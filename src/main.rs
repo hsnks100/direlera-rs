@@ -1,56 +1,48 @@
+use direlera_rs::accept_server::AcceptServer;
+use direlera_rs::room::*;
+use direlera_rs::service_server::{self, *};
 use std::error::Error;
 use std::net::SocketAddr;
 use std::{env, io};
+use tokio::join;
 use tokio::net::UdpSocket;
-
-struct Server {
-    socket: UdpSocket,
-    buf: Vec<u8>,
-    to_send: Option<(usize, SocketAddr)>,
-}
-
-impl Server {
-    async fn run(self) -> Result<(), io::Error> {
-        let Server {
-            socket,
-            mut buf,
-            mut to_send,
-        } = self;
-
-        loop {
-            // First we check to see if there's a message we need to echo back.
-            // If so then we try to send it back to the original source, waiting
-            // until it's writable and we're able to do so.
-            if let Some((size, peer)) = to_send {
-                let amt = socket.send_to(&buf[..size], &peer).await?;
-
-                println!("Echoed {}/{} bytes to {}", amt, size, peer);
-            }
-
-            // If we're here then `to_send` is `None`, so we take a look for the
-            // next message we're going to echo back.
-            to_send = Some(socket.recv_from(&mut buf).await?);
-        }
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let addr = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "127.0.0.1:8080".to_string());
+    // let mut ur = UserRoom::new();
+    // let r = Room::new();
 
-    let socket = UdpSocket::bind(&addr).await?;
+    // ur.add_room(1, r)?;
+    // match ur.rooms.get_mut(&1) {
+    //     Some(s) => {
+    //         s.game_name = "hihi".to_string();
+    //     }
+    //     None => {}
+    // }
+
+    // for u in ur.rooms {
+    //     println!("room: {}, {:?}", u.0, u.1);
+    // }
+
+    // return Ok(());
+    let socket = UdpSocket::bind(&"0.0.0.0:27888").await?;
     println!("Listening on: {}", socket.local_addr()?);
 
-    let server = Server {
+    let server = AcceptServer {
         socket,
         buf: vec![0; 1024],
         to_send: None,
     };
 
-    // This starts the server task.
-    server.run().await?;
+    let user_room = UserRoom::new();
+    let service_sock = UdpSocket::bind(&"0.0.0.0:27999").await?;
+    let mut service_server = ServiceServer {
+        socket: service_sock,
+        buf: vec![0; 1024],
+        to_send: None,
+        user_room,
+    };
+    tokio::join!(server.run(), service_server.run());
 
     Ok(())
 }
