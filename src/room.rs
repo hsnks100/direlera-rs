@@ -1,8 +1,10 @@
+use std::error::Error;
 use std::{
     collections::HashMap,
     hash::Hash,
     net::{IpAddr, SocketAddr},
 };
+use tokio::net::UdpSocket;
 
 #[derive(Debug)]
 pub enum PlayerStatus {
@@ -11,6 +13,7 @@ pub enum PlayerStatus {
 }
 #[derive(Debug)]
 pub struct User {
+    pub server_socket: UdpSocket,
     pub ip_addr: SocketAddr,
     pub user_id: u16,
     pub name: String,
@@ -27,8 +30,9 @@ pub struct User {
 }
 
 impl User {
-    pub fn new(ip_addr: SocketAddr) -> User {
+    pub fn new(server_socket: UdpSocket, ip_addr: SocketAddr) -> User {
         User {
+            server_socket,
             user_id: 0,
             name: "".to_string(),
             emul_name: "".to_string(),
@@ -43,6 +47,10 @@ impl User {
             room_order: 0,
             ip_addr,
         }
+    }
+    pub async fn send_packet(self: Self) -> Result<(), Box<dyn Error>> {
+        self.server_socket.send_to(b"hihi", self.ip_addr).await?;
+        Ok(())
     }
 }
 #[derive(Debug)]

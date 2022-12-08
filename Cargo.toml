@@ -14,5 +14,6 @@ tokio = { version = "1.23.0", features = ["full"] }
 num-traits = "0.2"
 num-derive = "0.3"
 num = "0.4"
+serde_repr = "0.1.9"
 
 
