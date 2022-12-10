@@ -141,7 +141,7 @@ impl UserRoom {
         }
     }
     pub fn test_func(&mut self) {}
-    pub fn get_room(&mut self, game_id: u32) -> Result<Rc<RefCell<Room>>, Box<dyn Error>> {
+    pub fn get_room(&mut self, game_id: u32) -> Result<Rc<RefCell<Room>>, KailleraError> {
         let r = self.rooms.get(&game_id).ok_or(KailleraError::NotFound)?;
         Ok(r.clone())
     }

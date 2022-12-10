@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 type MessageT = u8;
+use log::{info, trace, warn};
 pub const USER_QUIT: MessageT = 1;
 pub const USER_JOIN: MessageT = 2;
 pub const USER_LOGIN_INFO: MessageT = 3;
@@ -95,4 +96,24 @@ impl Protocol {
         v.append(&mut self.data.clone());
         Ok(v)
     }
+}
+
+pub fn get_protocol_from_bytes(data: &Vec<u8>) -> Result<Vec<Protocol>, Box<dyn Error>> {
+    info!("get_protocol data: {:?}", data);
+    let mut v = Vec::new();
+
+    let mut cur_pos = 1;
+    while cur_pos + 5 <= data.len() {
+        // info!("{} <= {}", cur_pos + 5, data.len());
+        // info!("protocol body: {:?}", &data[cur_pos..cur_pos + 5]);
+        let protocol = bincode::deserialize::<ProtocolHeader>(&data[cur_pos..cur_pos + 5])?;
+        let d = &data[cur_pos + 5..cur_pos + 5 + protocol.length as usize - 1];
+        cur_pos += (5 + protocol.length - 1) as usize;
+        v.push(Protocol {
+            header: protocol,
+            data: d.to_vec(),
+        });
+    }
+    info!("after parse: {}", v.len());
+    return Ok(v);
 }

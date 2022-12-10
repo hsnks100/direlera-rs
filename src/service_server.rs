@@ -79,7 +79,7 @@ impl ServiceServer {
         } else if message.header.message_type == CREATE_GAME {
             self.svc_create_game(message.data.clone(), peer).await?;
         } else if message.header.message_type == QUIT_GAME {
-            // self.svc_create_game(message.data.clone(), peer).await?;
+            self.svc_quit_game(message.data.clone(), user).await?;
         } else if message.header.message_type == JOIN_GAME {
             self.svc_join_game(message.data.clone(), peer).await?;
         }
@@ -217,19 +217,24 @@ impl ServiceServer {
         let user = user_room.get_user(ip_addr)?;
         let iter = buf.split(|num| num == &0).collect::<Vec<_>>();
         // let game_name = String::from_utf8(iter.get(1).ok_or(KailleraError::NotFound)?.to_vec())?;
-        let mut game_name = iter.get(1).ok_or(KailleraError::NotFound)?.to_vec();
-        game_name.push(0u8);
-
-        for (_, user) in &self.user_room.users {
+        // create game packet
+        {
+            let game_name = iter.get(1).ok_or(KailleraError::NotFound)?.to_vec();
             let mut data = Vec::new();
             data.append(&mut user.borrow().name.clone().as_bytes().to_vec());
-            data.append(&mut game_name);
+            data.push(0u8);
+            data.append(&mut game_name.clone());
+            data.push(0u8);
             data.append(&mut user.borrow().emul_name.clone().as_bytes().to_vec());
+            data.push(0u8);
             data.append(&mut bincode::serialize::<u32>(&self.game_id)?);
-            user.borrow_mut()
-                .make_send_packet(&mut self.socket, Protocol::new(CREATE_GAME, data))
-                .await?;
+            for (_, user) in &self.user_room.users {
+                user.borrow_mut()
+                    .make_send_packet(&mut self.socket, Protocol::new(CREATE_GAME, data.clone()))
+                    .await?;
+            }
         }
+
         let mut new_room = Room::new();
         new_room.creator_id = user.borrow().name.clone();
         new_room.emul_name = user.borrow().emul_name.clone();
@@ -257,7 +262,7 @@ impl ServiceServer {
         }
         // join game
         {
-            for (_, user) in &self.user_room.users {
+            for (_, u) in &self.user_room.users {
                 let mut data = Vec::new();
                 data.push(0u8);
                 data.append(&mut bincode::serialize::<u32>(&new_room.game_id)?);
@@ -266,7 +271,7 @@ impl ServiceServer {
                 data.append(&mut bincode::serialize::<u32>(&user.borrow().ping)?);
                 data.append(&mut bincode::serialize::<u16>(&user.borrow().user_id)?);
                 data.push(user.borrow().connect_type);
-                user.borrow_mut()
+                u.borrow_mut()
                     .make_send_packet(&mut self.socket, Protocol::new(JOIN_GAME, data))
                     .await?;
             }
@@ -360,24 +365,52 @@ impl ServiceServer {
 
         Ok(())
     }
-}
+    pub async fn svc_quit_game(
+        self: &mut Self,
+        buf: Vec<u8>,
+        user: Rc<RefCell<User>>,
+    ) -> anyhow::Result<()> {
+        if !user.borrow().in_room {
+            anyhow::bail!("not exist in room")
+        }
 
-pub fn get_protocol_from_bytes(data: &Vec<u8>) -> Result<Vec<Protocol>, Box<dyn Error>> {
-    info!("get_protocol data: {:?}", data);
-    let mut v = Vec::new();
+        // 게임방을 나갈 때, 게임 중인 경우와 아닌 경우를 다르게 구분해서 처리해야 함.
+        // 싱크 갈림 현상을 대처하기 위해서 게임 중에는 플레이어 수를 변경하지 않으려 함.
 
-    let mut cur_pos = 1;
-    while cur_pos + 5 <= data.len() {
-        // info!("{} <= {}", cur_pos + 5, data.len());
-        // info!("protocol body: {:?}", &data[cur_pos..cur_pos + 5]);
-        let protocol = bincode::deserialize::<ProtocolHeader>(&data[cur_pos..cur_pos + 5])?;
-        let d = &data[cur_pos + 5..cur_pos + 5 + protocol.length as usize - 1];
-        cur_pos += (5 + protocol.length - 1) as usize;
-        v.push(Protocol {
-            header: protocol,
-            data: d.to_vec(),
-        });
+        let user_room = self.user_room.get_room(user.borrow().game_room_id)?;
+        if user_room.borrow().game_status != GameStatusWaiting {
+            let index = user.borrow().player_order as usize - 1;
+            {
+                // version2
+                let players = &mut user_room.borrow_mut().players;
+                players.get_mut(index).map(|player| *player = None);
+            }
+        } else {
+            user_room
+                .borrow_mut()
+                .players
+                .retain(|&x| x != user.borrow().ip_addr);
+        }
+        let mut close_game = false;
+        if user_room.borrow().player_count() == 0 {
+            self.user_room.delete_room(user.borrow().game_room_id)?;
+            close_game = true;
+        }
+        if close_game {
+            info!("close game");
+            // game close noti
+            let mut data = Vec::new();
+            data.push(0u8);
+            data.append(&mut bincode::serialize::<u32>(&user_room.borrow().game_id)?);
+            for (addr, u) in &self.user_room.users {
+                u.borrow_mut()
+                    .make_send_packet(&mut self.socket, Protocol::new(CLOSE_GAME, data.clone()))
+                    .await?;
+            }
+        } else {
+            info!("keep game room")
+            // game status noti
+        }
+        Ok(())
     }
-    info!("after parse: {}", v.len());
-    return Ok(v);
 }
