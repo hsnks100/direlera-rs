@@ -110,19 +110,8 @@ impl ServiceServer {
         ip_addr: SocketAddr,
     ) -> Result<(), Box<dyn Error>> {
         info!("on svc_ack");
-        // let user = self
-        //     .user_room
-        //     .users
-        //     .get_mut(&ip_addr)
-        //     .ok_or(KailleraError::NotFound)?;
         let user_room = &mut self.user_room;
         let user = user_room.get_user(ip_addr)?;
-        // let user_name = user.name.clone();
-        // let user_id = user.user_id;
-        // let user_ping = user.ping;
-        // let user_conn_type = user.connect_type;
-        // let user_send_count = user.send_count;
-
         if user.borrow().send_count <= 4 {
             let send_data = bincode::serialize::<AckProtocol>(&AckProtocol::new())?;
             let protocol = Protocol::new(S2C_ACK, send_data);
@@ -139,12 +128,12 @@ impl ServiceServer {
             }
             for i in &self.user_room.users {
                 let mut data = Vec::new();
-                let mut name = i.1.borrow().name.clone().as_bytes().to_vec();
+                let mut name = user.borrow().name.clone().as_bytes().to_vec();
                 data.append(&mut name);
                 data.push(0u8);
-                data.append(&mut bincode::serialize::<u16>(&i.1.borrow().user_id)?);
-                data.append(&mut bincode::serialize::<u32>(&i.1.borrow().ping)?);
-                data.push(i.1.borrow().connect_type);
+                data.append(&mut bincode::serialize::<u16>(&user.borrow().user_id)?);
+                data.append(&mut bincode::serialize::<u32>(&user.borrow().ping)?);
+                data.push(user.borrow().connect_type);
                 i.1.borrow_mut()
                     .make_send_packet(&mut self.socket, Protocol::new(USER_JOIN, data))
                     .await?;
