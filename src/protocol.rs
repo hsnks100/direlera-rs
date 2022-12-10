@@ -82,7 +82,8 @@ impl Protocol {
             data,
         }
     }
-    pub fn make_packet(self: &Self) -> Result<Vec<u8>, Box<dyn Error>> {
+    pub fn make_packet(self: &Self) -> anyhow::Result<Vec<u8>> {
+        // }, Box<dyn Error>> {
         let mut v = Vec::new();
         let prob = ProtocolHeader {
             seq: self.header.seq,

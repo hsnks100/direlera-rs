@@ -4,6 +4,7 @@ use crate::room::*;
 use log::{info, trace, warn};
 use std::cell::RefCell;
 use std::error::Error;
+use std::io::Read;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::{cmp::*, io};
@@ -41,7 +42,7 @@ impl ServiceServer {
             .user_room
             .users
             .entry(peer)
-            .or_insert(Rc::new(RefCell::new(User::new(peer))));
+            .or_insert(Rc::new(RefCell::new(User::new(Some(peer)))));
         let messages: Vec<_> = r
             .iter()
             .filter(|&n| n.header.seq == user.borrow().cur_seq)
@@ -77,7 +78,12 @@ impl ServiceServer {
             self.svc_game_chat(message.data.clone(), peer).await?;
         } else if message.header.message_type == CREATE_GAME {
             self.svc_create_game(message.data.clone(), peer).await?;
+        } else if message.header.message_type == QUIT_GAME {
+            // self.svc_create_game(message.data.clone(), peer).await?;
+        } else if message.header.message_type == JOIN_GAME {
+            self.svc_join_game(message.data.clone(), peer).await?;
         }
+
         Ok(())
     }
     pub async fn svc_user_login(
@@ -234,7 +240,7 @@ impl ServiceServer {
         new_room.game_name =
             String::from_utf8_lossy(iter.get(1).ok_or(KailleraError::NotFound)?).to_string();
         new_room.game_status = GameStatusWaiting;
-        new_room.players.push(Some(user.borrow().ip_addr));
+        new_room.players.push(user.borrow().ip_addr);
         // update game status
         {
             for (_, user) in &self.user_room.users {
@@ -286,7 +292,74 @@ impl ServiceServer {
 
         Ok(())
     }
-    // TODO: JoinGame, QuitGame, GameData, GameCahce, GameStart
+    pub async fn svc_join_game(
+        self: &mut Self,
+        buf: Vec<u8>,
+        ip_addr: SocketAddr,
+    ) -> Result<(), Box<dyn Error>> {
+        info!("on svc_join_game");
+        let user_room = &mut self.user_room;
+        let game_id = bincode::deserialize::<u32>(&buf[1..5])?;
+        let user = user_room.get_user(ip_addr)?;
+        let conn_type = buf.get(12).ok_or(KailleraError::NotFound);
+        let join_room = self.user_room.get_room(game_id)?;
+        join_room.borrow_mut().players.push(user.borrow().ip_addr);
+        user.borrow_mut().game_room_id = game_id;
+        user.borrow_mut().in_room = true;
+
+        // send join message to all users.
+        for (addr, user) in &self.user_room.users {
+            let mut data = Vec::new();
+            data.push(0u8);
+            data.append(&mut bincode::serialize::<u32>(&game_id)?);
+            data.push(join_room.borrow().game_status);
+            data.push(join_room.borrow().players.len() as u8);
+            data.push(4 as u8);
+            user.borrow_mut()
+                .make_send_packet(&mut self.socket, Protocol::new(UPDATE_GAME_STATUS, data))
+                .await?;
+        }
+        // response game join message
+        {
+            let mut data = Vec::new();
+            data.push(0u8);
+            data.append(&mut bincode::serialize::<u32>(
+                &(join_room.borrow().players.len() as u32 - 1),
+            )?);
+            for i in &join_room.borrow().players {
+                if let Some(addr) = *i {
+                    let room_user = self.user_room.get_user(addr)?;
+                    let room_user = room_user.borrow();
+                    data.append(&mut room_user.name.clone().as_bytes().to_vec());
+                    data.push(0u8);
+                    data.append(&mut bincode::serialize::<u32>(&room_user.ping)?);
+                    data.append(&mut bincode::serialize::<u16>(&room_user.user_id)?);
+                    data.push(room_user.connect_type);
+                }
+            }
+            user.borrow_mut()
+                .make_send_packet(&mut self.socket, Protocol::new(PLAYER_INFO, data))
+                .await?;
+        }
+        // send joingame to all users
+        {
+            let mut data = Vec::new();
+            data.push(0u8);
+            data.append(&mut bincode::serialize::<u32>(&game_id)?);
+            data.append(&mut user.borrow().name.clone().as_bytes().to_vec());
+            data.push(0u8);
+            data.append(&mut bincode::serialize::<u32>(&user.borrow().ping)?);
+            data.append(&mut bincode::serialize::<u16>(&user.borrow().user_id)?);
+            data.push(user.borrow().connect_type);
+            for (addr, u) in &self.user_room.users {
+                u.borrow_mut()
+                    .make_send_packet(&mut self.socket, Protocol::new(JOIN_GAME, data.clone()))
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 pub fn get_protocol_from_bytes(data: &Vec<u8>) -> Result<Vec<Protocol>, Box<dyn Error>> {
@@ -294,10 +367,8 @@ pub fn get_protocol_from_bytes(data: &Vec<u8>) -> Result<Vec<Protocol>, Box<dyn 
     let mut v = Vec::new();
 
     let mut cur_pos = 1;
-    let mut loopCount = 0;
     while cur_pos + 5 <= data.len() {
         // info!("{} <= {}", cur_pos + 5, data.len());
-        loopCount += 1;
         // info!("protocol body: {:?}", &data[cur_pos..cur_pos + 5]);
         let protocol = bincode::deserialize::<ProtocolHeader>(&data[cur_pos..cur_pos + 5])?;
         let d = &data[cur_pos + 5..cur_pos + 5 + protocol.length as usize - 1];

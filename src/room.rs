@@ -13,7 +13,7 @@ type PlayerStatus = u8;
 pub const Playing: PlayerStatus = 0;
 pub const Idle: PlayerStatus = 1;
 pub struct User {
-    pub ip_addr: SocketAddr,
+    pub ip_addr: Option<SocketAddr>,
     pub user_id: u16,
     pub name: String,
     pub emul_name: String,
@@ -34,7 +34,7 @@ pub struct User {
 }
 
 impl User {
-    pub fn new(ip_addr: SocketAddr) -> User {
+    pub fn new(ip_addr: Option<SocketAddr>) -> User {
         User {
             user_id: 0,
             name: "".to_string(),
@@ -61,24 +61,30 @@ impl User {
         &mut self,
         server_socket: &mut UdpSocket,
         mut p: Protocol,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> anyhow::Result<()> {
+        // } Result<(), Box<dyn Error>> {
         // self.server_socket.send_to(b"hihi", self.ip_addr).await?;
-        p.header.seq = self.send_count;
-        self.packets.push(p);
-        let extra_packets = cmp::min(3, self.packets.len());
-        let mut packet = Vec::new();
-        packet.push(extra_packets as u8);
-        let packetLen = self.packets.len();
-        for i in 0..extra_packets {
-            let prev_procotol = self
-                .packets
-                .get_mut(packetLen - 1 - i)
-                .ok_or(KailleraError::NotFound)?;
-            let mut prev_packet = prev_procotol.make_packet()?;
-            packet.append(&mut prev_packet);
+        match self.ip_addr {
+            Some(ip_addr) => {
+                p.header.seq = self.send_count;
+                self.packets.push(p);
+                let extra_packets = cmp::min(3, self.packets.len());
+                let mut packet = Vec::new();
+                packet.push(extra_packets as u8);
+                let packetLen = self.packets.len();
+                for i in 0..extra_packets {
+                    let prev_procotol = self
+                        .packets
+                        .get_mut(packetLen - 1 - i)
+                        .ok_or(KailleraError::NotFound)?;
+                    let mut prev_packet = prev_procotol.make_packet()?;
+                    packet.append(&mut prev_packet);
+                }
+                server_socket.send_to(&packet, ip_addr).await?;
+                self.send_count += 1;
+            }
+            None => anyhow::bail!("not exist"),
         }
-        server_socket.send_to(&packet, self.ip_addr).await?;
-        self.send_count += 1;
         Ok(())
     }
 }
@@ -180,15 +186,17 @@ impl UserRoom {
 
         for i in &self.users {
             let u = i.1.borrow();
-            if u.ip_addr != exclude {
-                data.append(&mut u.name.clone().into_bytes());
-                data.push(0u8);
-                data.append(&mut bincode::serialize::<u32>(&u.ping)?);
-                data.push(
-                    num::ToPrimitive::to_u8(&u.player_status).ok_or(KailleraError::NotFound)?,
-                );
-                data.append(&mut bincode::serialize::<u16>(&u.user_id)?);
-                data.push(u.connect_type);
+            if let Some(ip_addr) = u.ip_addr {
+                if ip_addr != exclude {
+                    data.append(&mut u.name.clone().into_bytes());
+                    data.push(0u8);
+                    data.append(&mut bincode::serialize::<u32>(&u.ping)?);
+                    data.push(
+                        num::ToPrimitive::to_u8(&u.player_status).ok_or(KailleraError::NotFound)?,
+                    );
+                    data.append(&mut bincode::serialize::<u16>(&u.user_id)?);
+                    data.push(u.connect_type);
+                }
             }
         }
         for i in &self.rooms {

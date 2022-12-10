@@ -2,7 +2,7 @@ use direlera_rs::accept_server::AcceptServer;
 use direlera_rs::room::*;
 use direlera_rs::service_server::{self, *};
 use log::{error, info, log_enabled, trace, warn, Level, LevelFilter};
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::error::Error;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::{env, io};
 use tokio::join;
 use tokio::net::UdpSocket;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     env::set_var("RUST_LOG", "info");
