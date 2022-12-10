@@ -1,16 +1,12 @@
 use std::error::Error;
 
-use num_traits::ToPrimitive;
-use serde::{Deserialize, Serialize};
-use serde_repr::Deserialize_repr;
+use crate::cache_system::*;
+use crate::protocol::*;
+use log::{error, info, log_enabled, trace, warn, Level, LevelFilter};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::{
-    cmp,
-    collections::HashMap,
-    hash::Hash,
-    net::{IpAddr, SocketAddr},
-};
+use std::{cmp, collections::HashMap, net::SocketAddr};
+use thiserror::Error;
 use tokio::net::UdpSocket;
 
 type PlayerStatus = u8;
@@ -112,10 +108,6 @@ impl Room {
     }
 }
 
-use thiserror::Error;
-
-use crate::service_server::*;
-
 #[derive(Error, Debug)]
 pub enum KailleraError {
     #[error("{}, pos: {}", .message, .pos)]
@@ -130,7 +122,7 @@ pub enum KailleraError {
 
 pub struct UserRoom {
     pub users: HashMap<SocketAddr, Rc<RefCell<User>>>,
-    pub rooms: HashMap<u32, Box<Room>>,
+    pub rooms: HashMap<u32, Rc<RefCell<Room>>>,
     pub next_user_id: u16,
 }
 
@@ -143,14 +135,12 @@ impl UserRoom {
         }
     }
     pub fn test_func(&mut self) {}
+    pub fn get_room(&mut self, game_id: u32) -> Result<Rc<RefCell<Room>>, Box<dyn Error>> {
+        let r = self.rooms.get(&game_id).ok_or(KailleraError::NotFound)?;
+        Ok(r.clone())
+    }
     pub fn get_user(&mut self, ip_addr: SocketAddr) -> Result<Rc<RefCell<User>>, Box<dyn Error>> {
         let user = self.users.get(&ip_addr).ok_or(KailleraError::NotFound)?;
-        // return user;
-        // let user = user.get_mut(&ip_addr);
-        // let user = self
-        //     .users
-        //     .get_mut(&ip_addr)
-        //     .ok_or(KailleraError::NotFound)?;
         Ok(user.clone())
     }
     pub fn add_room(self: &mut Self, ch: u32, r: Room) -> Result<(), KailleraError> {
@@ -162,7 +152,7 @@ impl UserRoom {
                 });
             }
             None => {
-                self.rooms.insert(ch, Box::new(r));
+                self.rooms.insert(ch, Rc::new(RefCell::new(r)));
             }
         }
         Ok(())
@@ -202,68 +192,22 @@ impl UserRoom {
             }
         }
         for i in &self.rooms {
-            data.append(&mut i.1.game_name.clone().into_bytes());
+            data.append(&mut i.1.borrow().game_name.clone().into_bytes());
             data.push(0u8);
-            data.append(&mut bincode::serialize::<u32>(&i.1.game_id)?);
-            data.append(&mut i.1.emul_name.clone().into_bytes());
+            data.append(&mut bincode::serialize::<u32>(&i.1.borrow().game_id)?);
+            data.append(&mut i.1.borrow().emul_name.clone().into_bytes());
             data.push(0u8);
-            data.append(&mut i.1.creator_id.clone().into_bytes());
+            data.append(&mut i.1.borrow().creator_id.clone().into_bytes());
             data.push(0u8);
-            // let players = format!("%d/%d", i.1.player_count(), 4).as_bytes();
             data.append(
-                &mut format!("{}/{}\x00", i.1.player_count(), 4)
+                &mut format!("{}/{}\x00", i.1.borrow().player_count(), 4)
                     .as_bytes()
                     .to_vec(),
             );
-            data.push(i.1.game_status);
+            data.push(i.1.borrow().game_status);
         }
         let mut p = Protocol::new(USER_SERVER_STATUS, data);
         p.header.seq = seq;
         Ok(p)
-    }
-}
-
-#[derive(Debug)]
-pub struct CacheSystem {
-    pub position: u8,
-    pub incoming_data: HashMap<u8, Vec<u8>>,
-    pub incoming_hit_cache: HashMap<Vec<u8>, u8>,
-}
-
-impl CacheSystem {
-    pub fn new() -> CacheSystem {
-        CacheSystem {
-            position: 0,
-            incoming_data: HashMap::new(),
-            incoming_hit_cache: HashMap::new(),
-        }
-    }
-    pub fn get_cache_position(self, b: Vec<u8>) -> Result<u8, KailleraError> {
-        match self.incoming_hit_cache.get(&b) {
-            Some(s) => Ok(*s),
-            None => {
-                return Err(KailleraError::NotFound);
-            }
-        }
-    }
-    pub fn put_data(self: &mut Self, b: Vec<u8>) -> u8 {
-        match self.incoming_hit_cache.get(&b) {
-            Some(s) => *s,
-            None => {
-                self.incoming_data.insert(self.position, b.clone());
-                self.incoming_hit_cache.insert(b, self.position);
-                self.position += 1;
-                if self.position >= 250 {
-                    println!("warning cache");
-                }
-                self.position - 1
-            }
-        }
-    }
-    pub fn get_data(self, pos: u8) -> Result<Vec<u8>, KailleraError> {
-        match self.incoming_data.get(&pos) {
-            Some(s) => Ok(s.clone()),
-            None => Err(KailleraError::NotFound),
-        }
     }
 }

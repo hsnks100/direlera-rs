@@ -1,3 +1,4 @@
+use log::{error, info, log_enabled, trace, warn, Level, LevelFilter};
 use std::error::Error;
 use std::net::SocketAddr;
 use std::{env, io};
@@ -11,7 +12,7 @@ pub struct AcceptServer {
 
 impl AcceptServer {
     pub async fn run(self) -> Result<(), io::Error> {
-        println!("Accept Run");
+        info!("Accept Run");
         let AcceptServer {
             socket,
             mut buf,
@@ -23,7 +24,7 @@ impl AcceptServer {
             // If so then we try to send it back to the original source, waiting
             // until it's writable and we're able to do so.
             if let Some((size, peer)) = to_send {
-                println!("size: {}", size);
+                info!("size: {}", size);
                 if size == 5 {
                     let ping = b"PING\x00";
                     if ping == &buf[..size] {
@@ -35,9 +36,6 @@ impl AcceptServer {
                         .await?;
                 }
             }
-
-            // If we're here then `to_send` is `None`, so we take a look for the
-            // next message we're going to echo back.
             to_send = Some(socket.recv_from(&mut buf).await?);
         }
     }
