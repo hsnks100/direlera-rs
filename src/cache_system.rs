@@ -16,6 +16,11 @@ impl CacheSystem {
             incoming_hit_cache: HashMap::new(),
         }
     }
+    pub fn reset(&mut self) {
+        self.position = 0;
+        self.incoming_data.clear();
+        self.incoming_hit_cache.clear();
+    }
     pub fn get_cache_position(self, b: Vec<u8>) -> Result<u8, KailleraError> {
         match self.incoming_hit_cache.get(&b) {
             Some(s) => Ok(*s),

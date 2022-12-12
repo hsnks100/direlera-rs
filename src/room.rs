@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::fmt;
 
 use crate::cache_system::*;
 use crate::protocol::*;
@@ -13,7 +14,7 @@ type PlayerStatus = u8;
 pub const Playing: PlayerStatus = 0;
 pub const Idle: PlayerStatus = 1;
 pub struct User {
-    pub ip_addr: Option<SocketAddr>,
+    pub ip_addr: SocketAddr,
     pub user_id: u16,
     pub name: String,
     pub emul_name: String,
@@ -25,16 +26,16 @@ pub struct User {
     pub cur_seq: u16,
     pub game_room_id: u32,
     pub in_room: bool,
-    pub room_order: i32,
+    pub room_order: u8,
     pub packets: Vec<Protocol>,
-    pub player_order: i32,
+    pub player_order: u8,
     pub players_input: Vec<Vec<u8>>,
     pub cache_system: CacheSystem,
     pub put_cache: CacheSystem,
 }
 
 impl User {
-    pub fn new(ip_addr: Option<SocketAddr>) -> User {
+    pub fn new(ip_addr: SocketAddr) -> User {
         User {
             user_id: 0,
             name: "".to_string(),
@@ -56,7 +57,13 @@ impl User {
             put_cache: CacheSystem::new(),
         }
     }
-    pub async fn haha(&mut self, server_socket: &mut UdpSocket) {}
+    pub fn reset_outcoming(&mut self) {
+        self.cache_system.reset();
+        self.put_cache.reset();
+        self.players_input.clear();
+        self.players_input.resize(32, Vec::new());
+    }
+
     pub async fn make_send_packet(
         &mut self,
         server_socket: &mut UdpSocket,
@@ -64,27 +71,23 @@ impl User {
     ) -> anyhow::Result<()> {
         // } Result<(), Box<dyn Error>> {
         // self.server_socket.send_to(b"hihi", self.ip_addr).await?;
-        match self.ip_addr {
-            Some(ip_addr) => {
-                p.header.seq = self.send_count;
-                self.packets.push(p);
-                let extra_packets = cmp::min(3, self.packets.len());
-                let mut packet = Vec::new();
-                packet.push(extra_packets as u8);
-                let packetLen = self.packets.len();
-                for i in 0..extra_packets {
-                    let prev_procotol = self
-                        .packets
-                        .get_mut(packetLen - 1 - i)
-                        .ok_or(KailleraError::NotFound)?;
-                    let mut prev_packet = prev_procotol.make_packet()?;
-                    packet.append(&mut prev_packet);
-                }
-                server_socket.send_to(&packet, ip_addr).await?;
-                self.send_count += 1;
-            }
-            None => anyhow::bail!("not exist"),
+        let ip_addr = self.ip_addr;
+        p.header.seq = self.send_count;
+        self.packets.push(p);
+        let extra_packets = cmp::min(3, self.packets.len());
+        let mut packet = Vec::new();
+        packet.push(extra_packets as u8);
+        let packetLen = self.packets.len();
+        for i in 0..extra_packets {
+            let prev_procotol = self
+                .packets
+                .get_mut(packetLen - 1 - i)
+                .ok_or(KailleraError::NotFound)?;
+            let mut prev_packet = prev_procotol.make_packet()?;
+            packet.append(&mut prev_packet);
         }
+        server_socket.send_to(&packet, ip_addr).await?;
+        self.send_count += 1;
         Ok(())
     }
 }
@@ -110,7 +113,7 @@ impl Room {
         }
     }
     pub fn player_count(self: &Self) -> usize {
-        self.players.iter().filter(|&n| n.is_none()).count()
+        self.players.iter().filter(|&n| n.is_some()).count()
     }
 }
 
@@ -131,6 +134,36 @@ pub struct UserRoom {
     pub rooms: HashMap<u32, Rc<RefCell<Room>>>,
     pub next_user_id: u16,
 }
+impl fmt::Display for UserRoom {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut ret = "".to_string();
+        // lobby user information
+        for (addr, u) in &self.users {
+            let uu = u.borrow();
+            ret += &format!(
+                "{}: user_id: {}, user_name: {}, in_room: {}, room_order: {}, player_order: {}\n",
+                addr, uu.user_id, uu.name, uu.in_room, uu.room_order, uu.player_order
+            );
+        }
+        // game room information
+        for (addr, r) in &self.rooms {
+            let r = r.borrow();
+            ret += &format!(
+                "game_id: {}, game_name: {}, ",
+                r.game_id,
+                r.game_name.clone()[..3].to_string(),
+            );
+            ret += &format!("players: [");
+            let mut comma = "".to_string();
+            for p in &r.players {
+                ret += &format!("{} {:?}", comma, p);
+                comma = ", ".to_string();
+            }
+            ret += &"\n".to_string();
+        }
+        write!(f, "{}", ret)
+    }
+}
 
 impl UserRoom {
     pub fn new() -> UserRoom {
@@ -145,7 +178,7 @@ impl UserRoom {
         let r = self.rooms.get(&game_id).ok_or(KailleraError::NotFound)?;
         Ok(r.clone())
     }
-    pub fn get_user(&mut self, ip_addr: SocketAddr) -> Result<Rc<RefCell<User>>, Box<dyn Error>> {
+    pub fn get_user(&mut self, ip_addr: SocketAddr) -> Result<Rc<RefCell<User>>, KailleraError> {
         let user = self.users.get(&ip_addr).ok_or(KailleraError::NotFound)?;
         Ok(user.clone())
     }
@@ -186,17 +219,16 @@ impl UserRoom {
 
         for i in &self.users {
             let u = i.1.borrow();
-            if let Some(ip_addr) = u.ip_addr {
-                if ip_addr != exclude {
-                    data.append(&mut u.name.clone().into_bytes());
-                    data.push(0u8);
-                    data.append(&mut bincode::serialize::<u32>(&u.ping)?);
-                    data.push(
-                        num::ToPrimitive::to_u8(&u.player_status).ok_or(KailleraError::NotFound)?,
-                    );
-                    data.append(&mut bincode::serialize::<u16>(&u.user_id)?);
-                    data.push(u.connect_type);
-                }
+            let ip_addr = u.ip_addr;
+            if ip_addr != exclude {
+                data.append(&mut u.name.clone().into_bytes());
+                data.push(0u8);
+                data.append(&mut bincode::serialize::<u32>(&u.ping)?);
+                data.push(
+                    num::ToPrimitive::to_u8(&u.player_status).ok_or(KailleraError::NotFound)?,
+                );
+                data.append(&mut bincode::serialize::<u16>(&u.user_id)?);
+                data.push(u.connect_type);
             }
         }
         for i in &self.rooms {
