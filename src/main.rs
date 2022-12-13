@@ -13,6 +13,18 @@ use tokio::net::UdpSocket;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // let mut v = vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8]];
+    // let v2 = v.get_mut(0);
+    // match v2 {
+    //     Some(i) => {
+    //         let newV = i[0..2].to_vec();
+    //         *i = i[2..].to_vec();
+    //     }
+    //     None => {}
+    // }
+    // println!("{:?}", v);
+
+    // return Ok(());
     env::set_var("RUST_LOG", "info");
     env_logger::Builder::new()
         .format(|buf, record| {
@@ -42,13 +54,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         to_send: None,
     };
 
-    let user_room = UserRoom::new();
+    let session_manager = UserRoom::new();
     let service_sock = UdpSocket::bind(&"0.0.0.0:27999").await?;
     let mut service_server = ServiceServer {
         socket: service_sock,
         buf: vec![0; 1024],
         to_send: None,
-        user_room,
+        session_manager,
         game_id: 0,
     };
     tokio::join!(server.run(), service_server.run());

@@ -13,6 +13,7 @@ use tokio::net::UdpSocket;
 type PlayerStatus = u8;
 pub const Playing: PlayerStatus = 0;
 pub const Idle: PlayerStatus = 1;
+type PlayerInput = Vec<u8>;
 pub struct User {
     pub ip_addr: SocketAddr,
     pub user_id: u16,
@@ -172,6 +173,29 @@ impl UserRoom {
             rooms: HashMap::new(),
             next_user_id: 0,
         }
+    }
+    pub fn input_process() -> anyhow::Result<Vec<u8>> {
+        Ok(())
+    }
+    pub fn gen_input(user: Rc<RefCell<User>>, room: Rc<RefCell<Room>>) -> anyhow::Result<Vec<u8>> {
+        let requireInputs = user.borrow().connect_type;
+
+        let mut allInput = true;
+        for (i, e) in room.borrow().players.iter().enumerate() {
+            let l = match user.borrow().players_input.get(i) {
+                Some(i) => i.len() as u8,
+                None => break,
+            };
+            if l < requireInputs {
+                allInput = false;
+                break;
+            }
+        }
+        if !allInput {
+            anyhow::bail!("...")
+        }
+
+        return Ok(vec![0u8, 1, 2, 3]);
     }
     pub fn test_func(&mut self) {}
     pub fn get_room(&mut self, game_id: u32) -> Result<Rc<RefCell<Room>>, KailleraError> {

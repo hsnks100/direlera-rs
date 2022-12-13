@@ -43,7 +43,7 @@ impl CacheSystem {
             }
         }
     }
-    pub fn get_data(self, pos: u8) -> Result<Vec<u8>, KailleraError> {
+    pub fn get_data(&self, pos: u8) -> Result<Vec<u8>, KailleraError> {
         match self.incoming_data.get(&pos) {
             Some(s) => Ok(s.clone()),
             None => Err(KailleraError::NotFound),
