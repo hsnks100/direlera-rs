@@ -25,17 +25,13 @@ impl ServiceServer {
             if let Some((size, peer)) = self.to_send {
                 let result = self.service_proc(size, peer).await;
                 if result.is_err() {
-                    info!("err content: {:?}", result.err());
+                    info!("err content: {:?}", result);
                 }
             }
             self.to_send = Some(self.socket.recv_from(&mut self.buf).await?);
         }
     }
-    pub async fn service_proc(
-        &mut self,
-        size: usize,
-        peer: SocketAddr,
-    ) -> Result<(), Box<dyn Error>> {
+    pub async fn service_proc(&mut self, size: usize, peer: SocketAddr) -> anyhow::Result<()> {
         // info!("service size: {}, ", size);
         let r = get_protocol_from_bytes(&self.buf[..size].to_vec())?;
         let user = {
@@ -48,20 +44,10 @@ impl ServiceServer {
             .iter()
             .filter(|&n| n.header.seq == user.borrow().cur_seq)
             .collect();
-        info!(
-            "message len: {}, want seq: {}, r: {}",
-            messages.len(),
-            user.borrow().cur_seq,
-            r.len(),
-        );
 
         let message = messages.get(0).ok_or(KailleraError::NotFound)?;
         let user = user.clone();
         user.borrow_mut().cur_seq += 1;
-        info!(
-            "recv message_type: {:?}, content: {:?}",
-            message.header.message_type, message.data,
-        );
         if message.header.message_type == USER_QUIT {
             self.svc_user_quit(message.data.clone(), user).await?;
         } else if message.header.message_type == USER_LOGIN_INFO {
@@ -106,7 +92,7 @@ impl ServiceServer {
         &mut self,
         buf: Vec<u8>,
         user: Rc<RefCell<User>>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> anyhow::Result<()> {
         info!("== svc_user_quit ==");
         let client_message = &buf[3..];
         // send quit message to all
@@ -124,7 +110,7 @@ impl ServiceServer {
         &mut self,
         buf: Vec<u8>,
         ip_addr: SocketAddr,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> anyhow::Result<()> {
         let user = self.session_manager.get_user(ip_addr)?;
         let iter = buf.split(|num| num == &0).collect::<Vec<_>>();
 
@@ -144,11 +130,7 @@ impl ServiceServer {
         // self.socket.send_to(&send_data, ip_addr).await?;
         Ok(())
     }
-    pub async fn svc_ack(
-        self: &mut Self,
-        buf: Vec<u8>,
-        ip_addr: SocketAddr,
-    ) -> Result<(), Box<dyn Error>> {
+    pub async fn svc_ack(self: &mut Self, buf: Vec<u8>, ip_addr: SocketAddr) -> anyhow::Result<()> {
         info!("on svc_ack");
         let user_room = &mut self.session_manager;
         let user = user_room.get_user(ip_addr)?;
@@ -194,7 +176,7 @@ impl ServiceServer {
         self: &mut Self,
         buf: Vec<u8>,
         ip_addr: SocketAddr,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> anyhow::Result<()> {
         let user_room = &mut self.session_manager;
         let user = user_room.get_user(ip_addr)?;
         let message = buf[1..].to_vec();
@@ -239,11 +221,7 @@ impl ServiceServer {
 
         Ok(())
     }
-    pub async fn svc_game_chat(
-        &mut self,
-        buf: Vec<u8>,
-        ip_addr: SocketAddr,
-    ) -> Result<(), Box<dyn Error>> {
+    pub async fn svc_game_chat(&mut self, buf: Vec<u8>, ip_addr: SocketAddr) -> anyhow::Result<()> {
         // let user_room = &self.user_room;
         let user = self.session_manager.get_user(ip_addr)?;
         if user.borrow().in_room {
@@ -276,7 +254,7 @@ impl ServiceServer {
         self: &mut Self,
         buf: Vec<u8>,
         ip_addr: SocketAddr,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> anyhow::Result<()> {
         let user_room = &mut self.session_manager;
         let user = user_room.get_user(ip_addr)?;
         let iter = buf.split(|num| num == &0).collect::<Vec<_>>();
@@ -365,7 +343,7 @@ impl ServiceServer {
         self: &mut Self,
         buf: Vec<u8>,
         ip_addr: SocketAddr,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> anyhow::Result<()> {
         info!("on svc_join_game");
         let user_room = &mut self.session_manager;
         let game_id = bincode::deserialize::<u32>(&buf[1..5])?;
@@ -446,7 +424,7 @@ impl ServiceServer {
 
         let user_room = self.session_manager.get_room(user.borrow().game_room_id)?;
         if user_room.borrow().game_status != GameStatusWaiting {
-            let index = user.borrow().player_order as usize - 1;
+            let index = user.borrow().player_index as usize;
             {
                 // version2
                 let players = &mut user_room.borrow_mut().players;
@@ -550,14 +528,14 @@ impl ServiceServer {
                 None => continue,
             }?;
             let mut u = u.borrow_mut();
-            u.player_order = order;
+            u.player_index = order;
             u.room_order = order;
             u.player_status = Playing;
 
             let mut data = Vec::new();
             data.push(0u8);
             data.append(&mut bincode::serialize(&(1 as u16))?);
-            data.push(order);
+            data.push(order + 1);
             data.push(user_room.borrow().players.len() as u8);
             u.reset_outcoming();
             u.players_input
@@ -574,6 +552,7 @@ impl ServiceServer {
         buf: Vec<u8>,
         user: Rc<RefCell<User>>,
     ) -> anyhow::Result<()> {
+        info!("================== svc_game_data ==================");
         let game_data_length = (bincode::deserialize::<u16>(&buf[1..3])?) as usize;
         if buf.len() < (3 + game_data_length) as usize {
             anyhow::bail!("..");
@@ -581,7 +560,8 @@ impl ServiceServer {
         let game_data = &buf[3..3 + game_data_length];
 
         let user_room = self.session_manager.get_room(user.borrow().game_room_id)?;
-        let target_user_index = user.borrow().player_order as usize - 1;
+        let target_user_index = user.borrow().player_index as usize;
+        user.borrow_mut().cache_system.put_data(game_data.to_vec());
 
         // user 입력 game_data 을 방에 모든 인원의 메모리에 넣어야 함.
         for pi in &user_room.borrow().players {
@@ -592,6 +572,8 @@ impl ServiceServer {
             u.borrow_mut().players_input[target_user_index].append(&mut game_data.to_vec().clone());
         }
         // InputProcess
+        self.input_process(buf.clone(), user.clone()).await?;
+        info!("================== svc_game_data good ==================");
         Ok(())
     }
     pub async fn svc_game_cache(
@@ -605,7 +587,7 @@ impl ServiceServer {
         let cache_position = buf[1];
         let input_data = user.borrow().cache_system.get_data(cache_position)?;
         let user_room = self.session_manager.get_room(user.borrow().game_room_id)?;
-        let target_user_index = user.borrow().player_order as usize - 1;
+        let target_user_index = user.borrow().player_index as usize;
 
         for pi in &user_room.borrow().players {
             let u = match pi {
@@ -614,7 +596,66 @@ impl ServiceServer {
             };
             u.borrow_mut().players_input[target_user_index].append(&mut input_data.clone());
         }
+        self.input_process(buf.clone(), user.clone()).await?;
 
+        Ok(())
+    }
+    pub async fn input_process(
+        &mut self,
+        buf: Vec<u8>,
+        user: Rc<RefCell<User>>,
+    ) -> anyhow::Result<()> {
+        let user_room = self.session_manager.get_room(user.borrow().game_room_id)?;
+        // create packet each player
+        for i in user_room.borrow().players.iter() {
+            let u = match i {
+                Some(i) => self.session_manager.get_user(*i)?,
+                None => continue,
+            };
+            let players_num = u.borrow().players_input.len();
+            let data_to_send_to_user = UserRoom::gen_input(u.clone(), players_num);
+            if let Ok(data_to_send_to_user) = data_to_send_to_user {
+                if data_to_send_to_user.len() > 0 {
+                    let t = u
+                        .borrow()
+                        .put_cache
+                        .get_cache_position(data_to_send_to_user.clone());
+
+                    match t {
+                        Ok(cache_position) => {
+                            let mut data = Vec::new();
+                            data.push(0u8);
+                            data.push(cache_position);
+                            u.borrow_mut()
+                                .make_send_packet(&mut self.socket, Protocol::new(GAME_CACHE, data))
+                                .await?;
+                        }
+                        Err(e) => {
+                            u.borrow_mut()
+                                .put_cache
+                                .put_data(data_to_send_to_user.clone());
+                            info!(
+                                "cache len : {}",
+                                u.borrow().put_cache.incoming_data_vec.len()
+                            );
+                            let mut data = Vec::new();
+                            data.push(0u8);
+                            data.append(&mut bincode::serialize(
+                                &(data_to_send_to_user.len() as u16),
+                            )?);
+                            data.append(&mut data_to_send_to_user.clone());
+                            u.borrow_mut()
+                                .make_send_packet(&mut self.socket, Protocol::new(GAME_DATA, data))
+                                .await?;
+                        }
+                    }
+
+                    // u.borrow()
+                    //     .put_cache
+                    //     .get_cache_position(data_to_send_to_user.clone())?;
+                }
+            }
+        }
         Ok(())
     }
     pub async fn svc_ready_to_playsignal(

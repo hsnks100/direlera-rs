@@ -29,7 +29,7 @@ pub struct User {
     pub in_room: bool,
     pub room_order: u8,
     pub packets: Vec<Protocol>,
-    pub player_order: u8,
+    pub player_index: u8,
     pub players_input: Vec<Vec<u8>>,
     pub cache_system: CacheSystem,
     pub put_cache: CacheSystem,
@@ -52,7 +52,7 @@ impl User {
             room_order: 0,
             ip_addr,
             packets: Vec::new(),
-            player_order: 0,
+            player_index: 0,
             players_input: Vec::new(),
             cache_system: CacheSystem::new(),
             put_cache: CacheSystem::new(),
@@ -88,7 +88,7 @@ impl User {
             packet.append(&mut prev_packet);
         }
         server_socket.send_to(&packet, ip_addr).await?;
-        self.send_count += 1;
+        self.send_count = self.send_count.wrapping_add(1);
         Ok(())
     }
 }
@@ -143,7 +143,7 @@ impl fmt::Display for UserRoom {
             let uu = u.borrow();
             ret += &format!(
                 "{}: user_id: {}, user_name: {}, in_room: {}, room_order: {}, player_order: {}\n",
-                addr, uu.user_id, uu.name, uu.in_room, uu.room_order, uu.player_order
+                addr, uu.user_id, uu.name, uu.in_room, uu.room_order, uu.player_index
             );
         }
         // game room information
@@ -174,28 +174,42 @@ impl UserRoom {
             next_user_id: 0,
         }
     }
-    pub fn input_process() -> anyhow::Result<Vec<u8>> {
-        Ok(())
-    }
-    pub fn gen_input(user: Rc<RefCell<User>>, room: Rc<RefCell<Room>>) -> anyhow::Result<Vec<u8>> {
-        let requireInputs = user.borrow().connect_type;
+    //
 
-        let mut allInput = true;
-        for (i, e) in room.borrow().players.iter().enumerate() {
-            let l = match user.borrow().players_input.get(i) {
+    // 각 유저는 다른 플레이어에 대한 입력키를 다 가지고 있다.
+    // user 에게 보낼 입력데이터를 만드는 함수
+    pub fn gen_input(user: Rc<RefCell<User>>, players_num: usize) -> anyhow::Result<Vec<u8>> {
+        let require_inputs = user.borrow().connect_type;
+
+        let mut all_input = true;
+        for i in 0..players_num {
+            let l = match user.borrow().players_input.get(i as usize) {
                 Some(i) => i.len() as u8,
                 None => break,
             };
-            if l < requireInputs {
-                allInput = false;
+            if l < require_inputs * 2 {
+                all_input = false;
                 break;
             }
         }
-        if !allInput {
-            anyhow::bail!("...")
+        if !all_input {
+            anyhow::bail!("yet");
         }
 
-        return Ok(vec![0u8, 1, 2, 3]);
+        let mut ret = Vec::new();
+        for _ in 0..require_inputs {
+            for i in 0..(players_num as usize) {
+                {
+                    let mut t = user.borrow().players_input[i].clone()[..2].to_vec();
+                    ret.append(&mut t);
+                }
+                {
+                    let t = &mut user.borrow_mut().players_input[i];
+                    *t = t[2..].to_vec();
+                }
+            }
+        }
+        Ok(ret)
     }
     pub fn test_func(&mut self) {}
     pub fn get_room(&mut self, game_id: u32) -> Result<Rc<RefCell<Room>>, KailleraError> {
@@ -233,7 +247,7 @@ impl UserRoom {
         self: &Self,
         seq: u16,
         exclude: SocketAddr,
-    ) -> Result<Protocol, Box<dyn Error>> {
+    ) -> anyhow::Result<Protocol> {
         let mut data = Vec::new();
         data.push(0u8);
         data.append(&mut bincode::serialize::<u32>(

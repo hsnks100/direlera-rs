@@ -98,8 +98,7 @@ impl Protocol {
     }
 }
 
-pub fn get_protocol_from_bytes(data: &Vec<u8>) -> Result<Vec<Protocol>, Box<dyn Error>> {
-    info!("get_protocol data: {:?}", data);
+pub fn get_protocol_from_bytes(data: &Vec<u8>) -> anyhow::Result<Vec<Protocol>> {
     let mut v = Vec::new();
 
     let mut cur_pos = 1;
@@ -114,6 +113,5 @@ pub fn get_protocol_from_bytes(data: &Vec<u8>) -> Result<Vec<Protocol>, Box<dyn 
             data: d.to_vec(),
         });
     }
-    info!("after parse: {}", v.len());
     return Ok(v);
 }
