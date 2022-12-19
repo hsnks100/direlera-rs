@@ -1,7 +1,10 @@
 use crate::protocol::*;
 use crate::room::*;
 
+#[cfg(feature = "alloc")]
+use encoding_rs::*;
 use log::{info, trace, warn};
+use serde::__private::from_utf8_lossy;
 use std::cell::RefCell;
 use std::error::Error;
 use std::io::Read;
@@ -72,7 +75,7 @@ impl ServiceServer {
         } else if message.header.message_type == JOIN_GAME {
             self.svc_join_game(message.data.clone(), peer).await?;
         } else if message.header.message_type == KICK_USER_FROM_GAME {
-            // self.svc_join_game(message.data.clone(), peer).await?;
+            self.svc_kick_user(message.data.clone(), user).await?;
         } else if message.header.message_type == START_GAME {
             self.svc_start_game(message.data.clone(), user).await?;
         } else if message.header.message_type == GAME_DATA {
@@ -80,7 +83,7 @@ impl ServiceServer {
         } else if message.header.message_type == GAME_CACHE {
             self.svc_game_cache(message.data.clone(), user).await?;
         } else if message.header.message_type == DROP_GAME {
-            // self.svc_join_game(message.data.clone(), peer).await?;
+            self.svc_drop_game(message.data.clone(), user).await?;
         } else if message.header.message_type == READY_TO_PLAY_SIGNAL {
             self.svc_ready_to_playsignal(message.data.clone(), user)
                 .await?;
@@ -98,7 +101,7 @@ impl ServiceServer {
         // send quit message to all
         for (addr, u) in &self.session_manager.users {
             let mut data = Vec::new();
-            data.append(&mut user.borrow().name.clone().into_bytes());
+            data.append(&mut user.borrow().name.clone());
             data.push(0u8);
             data.append(&mut bincode::serialize(&user.borrow().user_id)?);
             data.append(&mut client_message.to_vec().clone());
@@ -114,13 +117,15 @@ impl ServiceServer {
         let user = self.session_manager.get_user(ip_addr)?;
         let iter = buf.split(|num| num == &0).collect::<Vec<_>>();
 
-        let user_name = String::from_utf8(iter.get(0).ok_or(KailleraError::NotFound)?.to_vec())?;
-        let emul_name = String::from_utf8(iter.get(1).ok_or(KailleraError::NotFound)?.to_vec())?;
+        info!("iter len: {}", iter.len());
+        let un = iter.get(0).ok_or(KailleraError::NotFound)?.to_vec();
+        let emul_name =
+            String::from_utf8_lossy(iter.get(1).ok_or(KailleraError::NotFound)?).to_string();
         let conn_type = iter.get(2).ok_or(KailleraError::NotFound)?[0];
-        user.borrow_mut().name = user_name.clone();
+        user.borrow_mut().name = un.clone();
         user.borrow_mut().emul_name = emul_name.clone();
         user.borrow_mut().connect_type = conn_type.clone();
-        info!("login info: {} {} {}", user_name, emul_name, conn_type);
+        info!("login info: {:?} {} {}", un.clone(), emul_name, conn_type);
 
         let send_data = bincode::serialize::<AckProtocol>(&AckProtocol::new())?;
         let protocol = Protocol::new(S2C_ACK, send_data);
@@ -150,7 +155,7 @@ impl ServiceServer {
             }
             for i in &self.session_manager.users {
                 let mut data = Vec::new();
-                let mut name = user.borrow().name.clone().as_bytes().to_vec();
+                let mut name = user.borrow().name.clone();
                 data.append(&mut name);
                 data.push(0u8);
                 data.append(&mut bincode::serialize::<u16>(&user.borrow().user_id)?);
@@ -181,7 +186,7 @@ impl ServiceServer {
         let user = user_room.get_user(ip_addr)?;
         let message = buf[1..].to_vec();
         let mut data = Vec::new();
-        data.append(&mut user.borrow().name.clone().as_bytes().to_vec());
+        data.append(&mut user.borrow().name.clone());
         data.push(0u8);
         data.append(&mut message.clone());
         // data.append(&mut "TEST string\x00".to_string().into_bytes());
@@ -190,9 +195,11 @@ impl ServiceServer {
                 .make_send_packet(&mut self.socket, Protocol::new(GLOBAL_CHAT, data.clone()))
                 .await?;
         }
+        // cp949 to utf-8 for message
+
         println!(
-            "chat message: {}",
-            String::from_utf8_lossy(&message.clone())
+            "chat message: {:?}",
+            encoding_rs::EUC_KR.decode(&message).0.to_string()
         );
 
         if String::from_utf8_lossy(&message.clone()) == "ts\x00" {
@@ -204,7 +211,7 @@ impl ServiceServer {
                 for each_data in split_data {
                     if each_data.len() > 0 {
                         let mut data = Vec::new();
-                        data.append(&mut user.borrow().name.clone().as_bytes().to_vec());
+                        data.append(&mut user.borrow().name.clone());
                         data.push(0u8);
                         data.append(&mut each_data.to_string().into_bytes());
                         data.push(0u8);
@@ -236,7 +243,7 @@ impl ServiceServer {
                     Some(s) => {
                         let u = self.session_manager.get_user(s)?;
                         let mut data = Vec::new();
-                        data.append(&mut user.borrow().name.clone().as_bytes().to_vec());
+                        data.append(&mut user.borrow().name.clone());
                         data.push(0u8);
                         data.append(&mut buf.clone()[1..].to_vec());
                         u.borrow_mut()
@@ -263,7 +270,7 @@ impl ServiceServer {
         {
             let game_name = iter.get(1).ok_or(KailleraError::NotFound)?.to_vec();
             let mut data = Vec::new();
-            data.append(&mut user.borrow().name.clone().as_bytes().to_vec());
+            data.append(&mut user.borrow().name.clone());
             data.push(0u8);
             data.append(&mut game_name.clone());
             data.push(0u8);
@@ -278,7 +285,7 @@ impl ServiceServer {
         }
 
         let mut new_room = Room::new();
-        new_room.creator_id = user.borrow().name.clone();
+        new_room.creator_id = from_utf8_lossy(user.borrow().name.clone().as_slice()).to_string();
         new_room.emul_name = user.borrow().emul_name.clone();
         new_room.game_id = self.game_id;
         user.borrow_mut().game_room_id = new_room.game_id;
@@ -308,7 +315,7 @@ impl ServiceServer {
                 let mut data = Vec::new();
                 data.push(0u8);
                 data.append(&mut bincode::serialize::<u32>(&new_room.game_id)?);
-                data.append(&mut user.borrow().name.clone().as_bytes().to_vec());
+                data.append(&mut user.borrow().name.clone());
                 data.push(0u8);
                 data.append(&mut bincode::serialize::<u32>(&user.borrow().ping)?);
                 data.append(&mut bincode::serialize::<u16>(&user.borrow().user_id)?);
@@ -325,11 +332,7 @@ impl ServiceServer {
             let game_name_str =
                 String::from_utf8_lossy(&iter.get(1).ok_or(KailleraError::NotFound)?.to_vec())
                     .to_string();
-            let s = format!(
-                "{} Creates Room: {}\x00",
-                user.borrow().name.clone(),
-                game_name_str.to_string()
-            );
+            let s = format!("Creates Room: {}\x00", game_name_str.to_string());
             data.append(&mut s.as_bytes().to_vec());
             user.borrow_mut()
                 .make_send_packet(&mut self.socket, Protocol::new(SERVER_INFO, data))
@@ -380,7 +383,7 @@ impl ServiceServer {
                 if let Some(addr) = *i {
                     let room_user = self.session_manager.get_user(addr)?;
                     let room_user = room_user.borrow();
-                    data.append(&mut room_user.name.clone().as_bytes().to_vec());
+                    data.append(&mut room_user.name.clone());
                     data.push(0u8);
                     data.append(&mut bincode::serialize::<u32>(&room_user.ping)?);
                     data.append(&mut bincode::serialize::<u16>(&room_user.user_id)?);
@@ -396,7 +399,7 @@ impl ServiceServer {
             let mut data = Vec::new();
             data.push(0u8);
             data.append(&mut bincode::serialize::<u32>(&game_id)?);
-            data.append(&mut user.borrow().name.clone().as_bytes().to_vec());
+            data.append(&mut user.borrow().name.clone());
             data.push(0u8);
             data.append(&mut bincode::serialize::<u32>(&user.borrow().ping)?);
             data.append(&mut bincode::serialize::<u16>(&user.borrow().user_id)?);
@@ -485,7 +488,7 @@ impl ServiceServer {
         // }
         // user.InRoom = false
         let mut data = Vec::new();
-        data.append(&mut user.borrow().name.clone().into_bytes());
+        data.append(&mut user.borrow().name.clone());
         data.push(0u8);
         data.append(&mut bincode::serialize(&user.borrow().user_id)?);
         for (addr, u) in &self.session_manager.users {
@@ -658,6 +661,115 @@ impl ServiceServer {
         }
         Ok(())
     }
+    pub async fn svc_drop_game(
+        &mut self,
+        buf: Vec<u8>,
+        user: Rc<RefCell<User>>,
+    ) -> anyhow::Result<()> {
+        let room = self.session_manager.get_room(user.borrow().game_room_id)?;
+        // send UPDATE_GAME_STATUS to session_manager.users all
+        let mut data = Vec::new();
+        data.push(0u8);
+        data.append(&mut bincode::serialize(&user.borrow().game_room_id)?);
+        data.push(room.borrow().game_status);
+        data.push(room.borrow().players.len() as u8);
+        data.push(4);
+        for (addr, u) in &self.session_manager.users {
+            u.borrow_mut()
+                .make_send_packet(
+                    &mut self.socket,
+                    Protocol::new(UPDATE_GAME_STATUS, data.clone()),
+                )
+                .await?;
+        }
+
+        // send DROP_GAME to room's users
+        for i in room.borrow().players.iter() {
+            let u = match i {
+                Some(i) => self.session_manager.get_user(*i)?,
+                None => continue,
+            };
+            let mut data = Vec::new();
+            data.append(&mut user.borrow().name.clone());
+            data.push(0u8);
+            data.push(user.borrow().player_index + 1);
+            u.borrow_mut()
+                .make_send_packet(&mut self.socket, Protocol::new(DROP_GAME, data))
+                .await?;
+        }
+
+        user.borrow_mut().player_status = Idle;
+        Ok(())
+    }
+    pub async fn svc_kick_user(
+        &mut self,
+        buf: Vec<u8>,
+        user: Rc<RefCell<User>>,
+    ) -> anyhow::Result<()> {
+        let room = self.session_manager.get_room(user.borrow().game_room_id)?;
+        let target_user_id = bincode::deserialize::<u16>(&buf[1..3])?;
+
+        // get user in room using target_user_id == User's user_id
+        let target_user = {
+            let mut target_user = None;
+            for i in room.borrow().players.iter() {
+                let u = match i {
+                    Some(i) => self.session_manager.get_user(*i)?,
+                    None => continue,
+                };
+                if u.borrow().user_id == target_user_id {
+                    target_user = Some(u);
+                    break;
+                }
+            }
+            match target_user {
+                Some(i) => i,
+                None => anyhow::bail!("target user not found"),
+            }
+        };
+
+        target_user.borrow_mut().in_room = false;
+        let mut data = Vec::new();
+        data.append(&mut target_user.borrow().name.clone());
+        data.push(0u8);
+        data.append(&mut bincode::serialize(&target_user_id)?);
+        // send QUIT_GAME data to room's users
+        for i in room.borrow().players.iter() {
+            let u = match i {
+                Some(i) => self.session_manager.get_user(*i)?,
+                None => continue,
+            };
+            u.borrow_mut()
+                .make_send_packet(&mut self.socket, Protocol::new(QUIT_GAME, data.clone()))
+                .await?;
+        }
+
+        // remove ip_addr target_user.borrow().ip_addr in room's players
+        room.borrow_mut().players.retain(|i| {
+            let delete = match i {
+                Some(i) => *i == target_user.borrow().ip_addr,
+                None => false,
+            };
+            !delete
+        });
+
+        // send UPDATE_GAME_STATUS to session_manager.users all
+        let mut data = Vec::new();
+        data.push(0u8);
+        data.append(&mut bincode::serialize(&user.borrow().game_room_id)?);
+        data.push(room.borrow().game_status);
+        data.push(room.borrow().players.len() as u8);
+        data.push(4);
+        for (addr, u) in &self.session_manager.users {
+            u.borrow_mut()
+                .make_send_packet(
+                    &mut self.socket,
+                    Protocol::new(UPDATE_GAME_STATUS, data.clone()),
+                )
+                .await?;
+        }
+        Ok(())
+    }
     pub async fn svc_ready_to_playsignal(
         &mut self,
         buf: Vec<u8>,
@@ -694,4 +806,13 @@ impl ServiceServer {
         }
         Ok(())
     }
+}
+
+// cp949 to utf-8 for vec<u8>
+fn cp949_to_utf8(data: Vec<u8>) -> String {
+    let mut s = String::new();
+    for i in data {
+        s.push(i as char);
+    }
+    s
 }

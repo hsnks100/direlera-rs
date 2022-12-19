@@ -1,9 +1,11 @@
 use std::error::Error;
 use std::fmt;
+use std::str::from_utf8_unchecked_mut;
 
 use crate::cache_system::*;
 use crate::protocol::*;
 use log::{error, info, log_enabled, trace, warn, Level, LevelFilter};
+use serde::__private::from_utf8_lossy;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::{cmp, collections::HashMap, net::SocketAddr};
@@ -17,7 +19,7 @@ type PlayerInput = Vec<u8>;
 pub struct User {
     pub ip_addr: SocketAddr,
     pub user_id: u16,
-    pub name: String,
+    pub name: Vec<u8>,
     pub emul_name: String,
     pub ping: u32,
     pub connect_type: u8,
@@ -39,7 +41,7 @@ impl User {
     pub fn new(ip_addr: SocketAddr) -> User {
         User {
             user_id: 0,
-            name: "".to_string(),
+            name: vec![0u8],
             emul_name: "".to_string(),
             ping: 0,
             connect_type: 0,
@@ -143,7 +145,12 @@ impl fmt::Display for UserRoom {
             let uu = u.borrow();
             ret += &format!(
                 "{}: user_id: {}, user_name: {}, in_room: {}, room_order: {}, player_order: {}\n",
-                addr, uu.user_id, uu.name, uu.in_room, uu.room_order, uu.player_index
+                addr,
+                uu.user_id,
+                from_utf8_lossy(uu.name.clone().as_slice()),
+                uu.in_room,
+                uu.room_order,
+                uu.player_index
             );
         }
         // game room information
@@ -259,7 +266,7 @@ impl UserRoom {
             let u = i.1.borrow();
             let ip_addr = u.ip_addr;
             if ip_addr != exclude {
-                data.append(&mut u.name.clone().into_bytes());
+                data.append(&mut u.name.clone());
                 data.push(0u8);
                 data.append(&mut bincode::serialize::<u32>(&u.ping)?);
                 data.push(
