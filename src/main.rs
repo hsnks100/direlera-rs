@@ -1,8 +1,10 @@
+use config::Config;
 use direlera_rs::accept_server::AcceptServer;
 use direlera_rs::room::*;
 use direlera_rs::service_server::{self, *};
 use log::{error, info, log_enabled, trace, warn, Level, LevelFilter};
 use std::cell::{RefCell, RefMut};
+use std::collections::HashMap;
 use std::error::Error;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -26,6 +28,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // return Ok(());
     env::set_var("RUST_LOG", "info");
+    let settings = Config::builder()
+        // Add in `./Settings.toml`
+        .add_source(config::File::with_name("./direlera"))
+        // Add in settings from the environment (with a prefix of APP)
+        // Eg.. `APP_DEBUG=1 ./target/app` would set the `debug` key
+        .add_source(config::Environment::with_prefix("APP"))
+        .build()
+        .unwrap();
+
+    // Print out our settings (as a HashMap)
+    let config_obj = settings.try_deserialize::<HashMap<String, String>>()?;
+    println!("{:?}", config_obj);
     env_logger::Builder::new()
         .format(|buf, record| {
             writeln!(
@@ -57,6 +71,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let session_manager = UserRoom::new();
     let service_sock = UdpSocket::bind(&"0.0.0.0:27999").await?;
     let mut service_server = ServiceServer {
+        config: config_obj,
         socket: service_sock,
         buf: vec![0; 1024],
         to_send: None,

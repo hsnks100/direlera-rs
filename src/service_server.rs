@@ -6,7 +6,9 @@ use encoding_rs::*;
 use log::{info, trace, warn};
 use serde::__private::from_utf8_lossy;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::error::Error;
+use std::ffi::CString;
 use std::io::Read;
 use std::net::SocketAddr;
 use std::rc::Rc;
@@ -14,6 +16,7 @@ use std::{cmp::*, io};
 use tokio::net::UdpSocket;
 
 pub struct ServiceServer {
+    pub config: HashMap<String, String>,
     pub socket: UdpSocket,
     pub buf: Vec<u8>,
     pub to_send: Option<(usize, SocketAddr)>,
@@ -135,7 +138,7 @@ impl ServiceServer {
         // self.socket.send_to(&send_data, ip_addr).await?;
         Ok(())
     }
-    pub async fn svc_ack(self: &mut Self, buf: Vec<u8>, ip_addr: SocketAddr) -> anyhow::Result<()> {
+    pub async fn svc_ack(&mut self, buf: Vec<u8>, ip_addr: SocketAddr) -> anyhow::Result<()> {
         info!("on svc_ack");
         let user_room = &mut self.session_manager;
         let user = user_room.get_user(ip_addr)?;
@@ -168,7 +171,13 @@ impl ServiceServer {
             {
                 let mut data = Vec::new();
                 data.append(&mut b"Server\x00".to_vec());
-                data.append(&mut b"Dire's kaillera server^^\x00".to_vec());
+
+                let mut euc_kr = encoding_rs::EUC_KR
+                    .encode(&self.config.get("notice").unwrap_or(&"".to_string()).clone())
+                    .0
+                    .to_vec();
+                data.append(&mut euc_kr);
+                data.push(0);
                 user.borrow_mut()
                     .make_send_packet(&mut self.socket, Protocol::new(SERVER_INFO, data))
                     .await?;
@@ -652,10 +661,6 @@ impl ServiceServer {
                                 .await?;
                         }
                     }
-
-                    // u.borrow()
-                    //     .put_cache
-                    //     .get_cache_position(data_to_send_to_user.clone())?;
                 }
             }
         }

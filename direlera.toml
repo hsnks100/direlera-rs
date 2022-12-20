@@ -1,0 +1,12 @@
+debug = false
+priority = 32
+key = "189rjfadoisfj8923fjio"
+notice = """
+This is a notice, and can be written on multiple lines.
+First of all, EUC_KR Korean encoding is supported.
+1
+2
+3
+4
+한글은?
+"""
