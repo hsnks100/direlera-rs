@@ -12,6 +12,7 @@ use std::ffi::CString;
 use std::io::Read;
 use std::net::SocketAddr;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 use std::{cmp::*, io};
 use tokio::net::UdpSocket;
 
@@ -66,7 +67,7 @@ impl ServiceServer {
         } else if message.header.message_type == USER_SERVER_STATUS {
         } else if message.header.message_type == S2C_ACK {
         } else if message.header.message_type == C2S_ACK {
-            self.svc_ack(message.data.clone(), peer).await?;
+            self.svc_ack(message.data.clone(), user).await?;
         } else if message.header.message_type == GLOBAL_CHAT {
             self.svc_global_chat(message.data.clone(), peer).await?;
         } else if message.header.message_type == GAME_CHAT {
@@ -132,26 +133,35 @@ impl ServiceServer {
 
         let send_data = bincode::serialize::<AckProtocol>(&AckProtocol::new())?;
         let protocol = Protocol::new(S2C_ACK, send_data);
+        user.borrow_mut().s2c_ack_time = Instant::now();
+
         user.borrow_mut()
             .make_send_packet(&mut self.socket, protocol)
             .await?;
         // self.socket.send_to(&send_data, ip_addr).await?;
         Ok(())
     }
-    pub async fn svc_ack(&mut self, buf: Vec<u8>, ip_addr: SocketAddr) -> anyhow::Result<()> {
+    pub async fn svc_ack(&mut self, buf: Vec<u8>, user: Rc<RefCell<User>>) -> anyhow::Result<()> {
         info!("on svc_ack");
+        let elapsed = user.borrow().s2c_ack_time.elapsed().as_millis();
         let user_room = &mut self.session_manager;
-        let user = user_room.get_user(ip_addr)?;
+        user.borrow_mut().pings.push(elapsed as i32);
         if user.borrow().send_count <= 4 {
             let send_data = bincode::serialize::<AckProtocol>(&AckProtocol::new())?;
+            user.borrow_mut().s2c_ack_time = Instant::now();
             let protocol = Protocol::new(S2C_ACK, send_data);
             user.borrow_mut()
                 .make_send_packet(&mut self.socket, protocol)
                 .await?;
         } else {
-            user.borrow_mut().ping = 3;
+            let sum: i32 = user.borrow().pings.iter().sum();
+            let len = user.borrow().pings.len() as f64;
+
+            let average = sum as f64 / len;
+            user.borrow_mut().ping = average as u32;
             {
-                let p = user_room.make_server_status(user.borrow().send_count, ip_addr)?;
+                let p = user_room
+                    .make_server_status(user.borrow().send_count, user.borrow().ip_addr)?;
                 user.borrow_mut()
                     .make_send_packet(&mut self.socket, p)
                     .await?;

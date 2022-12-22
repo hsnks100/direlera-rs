@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt;
 use std::str::from_utf8_unchecked_mut;
+use std::time::Instant;
 
 use crate::cache_system::*;
 use crate::protocol::*;
@@ -35,6 +36,8 @@ pub struct User {
     pub players_input: Vec<Vec<u8>>,
     pub cache_system: CacheSystem,
     pub put_cache: CacheSystem,
+    pub s2c_ack_time: Instant,
+    pub pings: Vec<i32>,
 }
 
 impl User {
@@ -58,6 +61,8 @@ impl User {
             players_input: Vec::new(),
             cache_system: CacheSystem::new(),
             put_cache: CacheSystem::new(),
+            pings: Vec::new(),
+            s2c_ack_time: Instant::now(),
         }
     }
     pub fn reset_outcoming(&mut self) {
