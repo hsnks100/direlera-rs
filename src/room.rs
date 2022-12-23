@@ -134,6 +134,8 @@ pub enum KailleraError {
     #[error("{}, pos: {}", .message, .pos)]
     AlreadyError { message: String, pos: usize },
     #[error("notfound error")]
+    GameStatusError { message: String },
+    #[error("gamestatus error")]
     NotFound,
 }
 
