@@ -16,6 +16,24 @@ use std::time::{Duration, Instant};
 use std::{cmp::*, io};
 use tokio::net::UdpSocket;
 
+struct ScopeCall<F: FnMut()> {
+    c: F,
+}
+impl<F: FnMut()> Drop for ScopeCall<F> {
+    fn drop(&mut self) {
+        (self.c)();
+    }
+}
+
+macro_rules! defer {
+    ($e:expr) => {
+        let _scope_call = ScopeCall {
+            c: || -> () {
+                $e;
+            },
+        };
+    };
+}
 pub struct ServiceServer {
     pub config: HashMap<String, String>,
     pub socket: UdpSocket,
@@ -575,6 +593,8 @@ impl ServiceServer {
         user: Rc<RefCell<User>>,
     ) -> anyhow::Result<()> {
         info!("================== svc_game_data ==================");
+        let t0 = Instant::now();
+        defer!(info!("svc_game_data: {:?}", t0.elapsed()));
         let game_data_length = (bincode::deserialize::<u16>(&buf[1..3])?) as usize;
         if buf.len() < (3 + game_data_length) as usize {
             anyhow::bail!("..");
@@ -648,9 +668,11 @@ impl ServiceServer {
                             let mut data = Vec::new();
                             data.push(0u8);
                             data.push(cache_position);
+                            let t0 = Instant::now();
                             u.borrow_mut()
                                 .make_send_packet(&mut self.socket, Protocol::new(GAME_CACHE, data))
                                 .await?;
+                            info!("make_send_packet: {:?}", t0.elapsed());
                         }
                         Err(e) => {
                             u.borrow_mut()
@@ -666,9 +688,11 @@ impl ServiceServer {
                                 &(data_to_send_to_user.len() as u16),
                             )?);
                             data.append(&mut data_to_send_to_user.clone());
+                            let t0 = Instant::now();
                             u.borrow_mut()
                                 .make_send_packet(&mut self.socket, Protocol::new(GAME_DATA, data))
                                 .await?;
+                            info!("make_send_packet: {:?}", t0.elapsed());
                         }
                     }
                 }
