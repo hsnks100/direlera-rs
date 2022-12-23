@@ -67,6 +67,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         socket,
         buf: vec![0; 1024],
         to_send: None,
+        config_obj: config_obj.clone(),
     };
 
     let session_manager = UserRoom::new();
