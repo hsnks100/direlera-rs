@@ -59,17 +59,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let x = 3 * 4; // expensive computation
         info!("the answer was: {}", x);
     }
-    let socket = UdpSocket::bind(&"0.0.0.0:27888").await?;
+    let main_port = config_obj.get("main_port").unwrap();
+    let socket = UdpSocket::bind(&format!("0.0.0.0:{}", main_port)).await?;
     error!("Listening on: {}", socket.local_addr()?);
 
     let server = AcceptServer {
         socket,
         buf: vec![0; 1024],
         to_send: None,
+        config_obj: config_obj.clone(),
     };
 
     let session_manager = UserRoom::new();
-    let service_sock = UdpSocket::bind(&"0.0.0.0:27999").await?;
+    let sub_port = config_obj.get("sub_port").unwrap();
+    let service_sock = UdpSocket::bind(&format!("0.0.0.0:{}", sub_port)).await?;
     let mut service_server = ServiceServer {
         config: config_obj,
         socket: service_sock,
