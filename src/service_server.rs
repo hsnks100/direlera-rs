@@ -101,14 +101,19 @@ impl ServiceServer {
         user: Rc<RefCell<User>>,
     ) -> anyhow::Result<()> {
         info!("== svc_user_quit ==");
+        let _ = self.fun_quit_game(buf.clone(), user.clone()).await;
+
         let client_message = &buf[3..];
         // send quit message to all
+        let mut data = Vec::new();
+        data.append(&mut user.borrow().name.clone());
+        data.push(0u8);
+        data.append(&mut bincode::serialize(&user.borrow().user_id)?);
+        data.append(&mut client_message.to_vec().clone());
         for (addr, u) in &self.session_manager.users {
-            let mut data = Vec::new();
-            data.append(&mut user.borrow().name.clone());
-            data.push(0u8);
-            data.append(&mut bincode::serialize(&user.borrow().user_id)?);
-            data.append(&mut client_message.to_vec().clone());
+            u.borrow_mut()
+                .make_send_packet(&mut self.socket, Protocol::new(USER_QUIT, data.clone()))
+                .await?;
         }
         self.session_manager.users.remove(&user.borrow().ip_addr);
         Ok(())
@@ -372,6 +377,13 @@ impl ServiceServer {
         let user = user_room.get_user(ip_addr)?;
         let conn_type = buf.get(12).ok_or(KailleraError::NotFound);
         let join_room = self.session_manager.get_room(game_id)?;
+        if join_room.borrow().game_status != GameStatusWaiting {
+            return Err(KailleraError::GameStatusError {
+                message: "game is playing".to_string(),
+            }
+            .into());
+        }
+
         join_room
             .borrow_mut()
             .players
@@ -432,7 +444,7 @@ impl ServiceServer {
 
         Ok(())
     }
-    pub async fn svc_quit_game(
+    pub async fn fun_quit_game(
         self: &mut Self,
         buf: Vec<u8>,
         user: Rc<RefCell<User>>,
@@ -498,14 +510,6 @@ impl ServiceServer {
                     .await?;
             }
         }
-        // send quit game to all
-        // 		for _, u := range s.userChannel.Users {
-        // 	data := make([]byte, 0)
-        // 	data = append(data, []byte(user.Name+"\x00")...)
-        // 	data = append(data, Uint16ToBytes(user.UserId)...)
-        // 	u.SendPacket(server, *NewProtocol(MessageTypeQuitGame, data))
-        // }
-        // user.InRoom = false
         let mut data = Vec::new();
         data.append(&mut user.borrow().name.clone());
         data.push(0u8);
@@ -517,6 +521,13 @@ impl ServiceServer {
         }
         user.borrow_mut().in_room = false;
         Ok(())
+    }
+    pub async fn svc_quit_game(
+        self: &mut Self,
+        buf: Vec<u8>,
+        user: Rc<RefCell<User>>,
+    ) -> anyhow::Result<()> {
+        self.fun_quit_game(buf, user).await
     }
 
     pub async fn svc_start_game(
@@ -574,12 +585,15 @@ impl ServiceServer {
         buf: Vec<u8>,
         user: Rc<RefCell<User>>,
     ) -> anyhow::Result<()> {
-        info!("================== svc_game_data ==================");
         let game_data_length = (bincode::deserialize::<u16>(&buf[1..3])?) as usize;
         if buf.len() < (3 + game_data_length) as usize {
             anyhow::bail!("..");
         }
         let game_data = &buf[3..3 + game_data_length];
+        info!(
+            "================== svc_game_data: {:?} ==================",
+            game_data.clone()
+        );
 
         let user_room = self.session_manager.get_room(user.borrow().game_room_id)?;
         let target_user_index = user.borrow().player_index as usize;
@@ -648,9 +662,11 @@ impl ServiceServer {
                             let mut data = Vec::new();
                             data.push(0u8);
                             data.push(cache_position);
+                            let t0 = Instant::now();
                             u.borrow_mut()
                                 .make_send_packet(&mut self.socket, Protocol::new(GAME_CACHE, data))
                                 .await?;
+                            info!("cache send time : {:?}", t0.elapsed());
                         }
                         Err(e) => {
                             u.borrow_mut()
@@ -666,9 +682,11 @@ impl ServiceServer {
                                 &(data_to_send_to_user.len() as u16),
                             )?);
                             data.append(&mut data_to_send_to_user.clone());
+                            let t0 = Instant::now();
                             u.borrow_mut()
                                 .make_send_packet(&mut self.socket, Protocol::new(GAME_DATA, data))
                                 .await?;
+                            info!("data send time : {:?}", t0.elapsed());
                         }
                     }
                 }
