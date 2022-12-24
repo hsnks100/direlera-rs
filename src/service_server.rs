@@ -567,7 +567,9 @@ impl ServiceServer {
 
             let mut data = Vec::new();
             data.push(0u8);
-            data.append(&mut bincode::serialize(&(1 as u16))?);
+            let frame_delay = Self::cal_frame_delay(u.connect_type, u.ping);
+            info!("frame_delay: {}", frame_delay);
+            data.append(&mut bincode::serialize(&(frame_delay as u16))?);
             data.push(order + 1);
             data.push(user_room.borrow().players.len() as u8);
             u.reset_outcoming();
@@ -578,6 +580,80 @@ impl ServiceServer {
             order += 1;
         }
         Ok(())
+    }
+    pub fn cal_frame_delay(connection_type: u8, ping: u32) -> u16 {
+        match connection_type {
+            1 => match ping {
+                0..=16 => 1,
+                17..=33 => 2,
+                34..=49 => 3,
+                50..=66 => 4,
+                67..=83 => 5,
+                84..=99 => 6,
+                100..=116 => 7,
+                117..=133 => 8,
+                134..=149 => 9,
+                150..=166 => 10,
+                167..=183 => 11,
+                184..=199 => 12,
+                200..=216 => 13,
+                217..=233 => 14,
+                234..=249 => 15,
+                250..=266 => 16,
+                267..=283 => 17,
+                284..=299 => 18,
+                300..=316 => 19,
+                317..=333 => 20,
+                334..=349 => 21,
+                _ => 22,
+            },
+            2 => match ping {
+                0..=33 => 3,
+                34..=66 => 5,
+                67..=99 => 7,
+                100..=133 => 9,
+                134..=166 => 11,
+                167..=199 => 13,
+                200..=233 => 15,
+                234..=266 => 17,
+                267..=299 => 19,
+                300..=333 => 21,
+                _ => 23,
+            },
+            3 => match ping {
+                0..=49 => 5,
+                50..=99 => 8,
+                100..=149 => 11,
+                150..=199 => 14,
+                200..=249 => 17,
+                250..=299 => 20,
+                300..=349 => 23,
+                _ => 26,
+            },
+            4 => match ping {
+                0..=66 => 7,
+                67..=133 => 11,
+                134..=199 => 15,
+                200..=266 => 19,
+                267..=333 => 23,
+                _ => 27,
+            },
+            5 => match ping {
+                0..=83 => 9,
+                84..=166 => 14,
+                167..=249 => 19,
+                250..=333 => 24,
+                _ => 29,
+            },
+            6 => match ping {
+                0..=99 => 11,
+                100..=199 => 17,
+                200..=299 => 23,
+                300..=399 => 29,
+                _ => 35,
+            },
+            _ => 1 as u16,
+        }
     }
 
     pub async fn svc_game_data(
@@ -666,13 +742,13 @@ impl ServiceServer {
                             u.borrow_mut()
                                 .make_send_packet(&mut self.socket, Protocol::new(GAME_CACHE, data))
                                 .await?;
-                            info!("cache send time : {:?}", t0.elapsed());
+                            trace!("cache send time : {:?}", t0.elapsed());
                         }
                         Err(e) => {
                             u.borrow_mut()
                                 .put_cache
                                 .put_data(data_to_send_to_user.clone());
-                            info!(
+                            trace!(
                                 "cache len : {}",
                                 u.borrow().put_cache.incoming_data_vec.len()
                             );
