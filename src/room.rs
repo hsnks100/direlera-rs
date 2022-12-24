@@ -302,4 +302,31 @@ impl UserRoom {
         p.header.seq = seq;
         Ok(p)
     }
+
+    // send GAME_CHAT to players of room
+    pub async fn send_game_chat_to_players(
+        &mut self,
+        server_socket: &mut UdpSocket,
+        room: Rc<RefCell<Room>>,
+        who: String,
+        message: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        // send GAME_CHAT to players of room
+        for i in &room.borrow().players {
+            let mut data = Vec::new();
+            data.append(&mut who.clone().into_bytes());
+            data.push(0u8);
+            data.append(&mut message.clone());
+            match i {
+                Some(i) => {
+                    let u = self.get_user(i.clone())?;
+                    u.borrow_mut()
+                        .make_send_packet(server_socket, Protocol::new(GAME_CHAT, data))
+                        .await?;
+                }
+                None => {}
+            }
+        }
+        Ok(())
+    }
 }

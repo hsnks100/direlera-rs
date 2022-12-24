@@ -554,6 +554,9 @@ impl ServiceServer {
         }
         // send GAME_START to room players
         let mut order = 0u8;
+
+        // show frame delay to all
+        let mut delay_messages: Vec<Vec<u8>> = Vec::new();
         for i in &user_room.borrow().players {
             let u = match i {
                 Some(i) => self.session_manager.get_user(*i),
@@ -568,6 +571,11 @@ impl ServiceServer {
             data.push(0u8);
             let frame_delay = Self::cal_frame_delay(u.connect_type, u.ping);
             info!("frame_delay: {}", frame_delay);
+            let mut notice_message = u.name.clone();
+            notice_message.append(&mut ", frame delay: ".to_string().into_bytes());
+            notice_message.append(&mut frame_delay.to_string().into_bytes());
+            notice_message.push(0u8);
+            delay_messages.push(notice_message.clone());
             data.append(&mut bincode::serialize(&(frame_delay as u16))?);
             data.push(order + 1);
             data.push(user_room.borrow().players.len() as u8);
@@ -577,6 +585,16 @@ impl ServiceServer {
             u.make_send_packet(&mut self.socket, Protocol::new(START_GAME, data))
                 .await?;
             order += 1;
+        }
+        for i in delay_messages {
+            self.session_manager
+                .send_game_chat_to_players(
+                    &mut self.socket,
+                    user_room.clone(),
+                    "SERVER".to_string(),
+                    i.clone(),
+                )
+                .await?;
         }
         Ok(())
     }
