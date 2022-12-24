@@ -133,7 +133,7 @@ impl ServiceServer {
         let conn_type = iter.get(2).ok_or(KailleraError::NotFound)?[0];
         user.borrow_mut().name = un.clone();
         user.borrow_mut().emul_name = emul_name.clone();
-        user.borrow_mut().connect_type = conn_type.clone();
+        user.borrow_mut().connect_type = 1; // fixed conn_type.clone();
         info!("login info: {:?} {} {}", un.clone(), emul_name, conn_type);
 
         let send_data = bincode::serialize::<AckProtocol>(&AckProtocol::new())?;
