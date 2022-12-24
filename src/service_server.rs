@@ -540,10 +540,9 @@ impl ServiceServer {
         // send UPDATE_GAME_STATUS to all
         let mut data = Vec::new();
         data.push(0u8);
+        data.append(&mut bincode::serialize(&user.borrow().game_room_id)?);
         data.push(user_room.borrow().game_status);
-        data.append(&mut bincode::serialize(
-            &(user_room.borrow().players.len() as u8),
-        )?);
+        data.push(user_room.borrow().players.len() as u8);
         data.push(4u8);
         for (addr, u) in &self.session_manager.users {
             u.borrow_mut()
@@ -553,7 +552,7 @@ impl ServiceServer {
                 )
                 .await?;
         }
-        // send UPDATE_GAME_STATUS to room users
+        // send GAME_START to room players
         let mut order = 0u8;
         for i in &user_room.borrow().players {
             let u = match i {
