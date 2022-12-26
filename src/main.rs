@@ -1,8 +1,8 @@
 use config::Config;
 use direlera_rs::accept_server::AcceptServer;
 use direlera_rs::room::*;
-use direlera_rs::service_server::{self, *};
-use log::{error, info, log_enabled, trace, warn, Level, LevelFilter};
+use direlera_rs::service_server::*;
+use log::{error, info, log_enabled, Level, LevelFilter};
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
@@ -11,19 +11,8 @@ use tokio::net::UdpSocket;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // let mut v = vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8]];
-    // let v2 = v.get_mut(0);
-    // match v2 {
-    //     Some(i) => {
-    //         let newV = i[0..2].to_vec();
-    //         *i = i[2..].to_vec();
-    //     }
-    //     None => {}
-    // }
-    // println!("{:?}", v);
-
-    // return Ok(());
     env::set_var("RUST_LOG", "info");
+    env::set_var("RUST_BACKTRACE", "1");
     let settings = Config::builder()
         // Add in `./Settings.toml`
         .add_source(config::File::with_name("./direlera"))
@@ -77,7 +66,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         session_manager,
         game_id: 0,
     };
-    tokio::join!(server.run(), service_server.run());
+    let (r0, r1) = tokio::join!(server.run(), service_server.run());
+    r0?;
+    r1?;
 
     Ok(())
 }

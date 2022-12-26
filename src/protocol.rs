@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
-use std::error::Error;
+
 type MessageT = u8;
-use log::{info, trace, warn};
+use log::info;
 pub const USER_QUIT: MessageT = 1;
 pub const USER_JOIN: MessageT = 2;
 pub const USER_LOGIN_INFO: MessageT = 3;
@@ -39,13 +41,17 @@ pub const GameStatusWaiting: GameStatus = 0;
 pub const GameStatusPlaying: GameStatus = 1;
 pub const GameStatusNetSync: GameStatus = 2;
 // #[repr(C, packed)]
-#[derive(Serialize, Deserialize)]
-pub struct ProtocolHeader {
-    pub seq: u16,
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProtocolPureHeader {
     pub length: u16,
     pub message_type: MessageT,
 }
-
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProtocolSeqHeader {
+    pub seq: u16,
+    pub header: ProtocolPureHeader,
+}
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AckProtocol {
     dummy0: u8,
@@ -67,31 +73,45 @@ impl AckProtocol {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Protocol {
-    pub header: ProtocolHeader,
+    pub header: ProtocolSeqHeader,
     pub data: Vec<u8>,
 }
+
+// impl Copy for Protocol {
+//     fn copy(&self) -> Self {
+//         Self {
+//             header: self.header,
+//             data: self.data.clone(),
+//         }
+//     }
+// }
 
 impl Protocol {
     pub fn new(message_type: MessageT, data: Vec<u8>) -> Protocol {
         Protocol {
-            header: ProtocolHeader {
+            header: ProtocolSeqHeader {
                 seq: 0,
-                length: 0,
-                message_type,
+                header: ProtocolPureHeader {
+                    length: data.len() as u16 + 1,
+                    message_type,
+                },
             },
             data,
         }
     }
-    pub fn make_packet(self: &Self) -> anyhow::Result<Vec<u8>> {
+    pub fn make_packet(&self) -> anyhow::Result<Vec<u8>> {
         // }, Box<dyn Error>> {
         let mut v = Vec::new();
-        let prob = ProtocolHeader {
+        let prob = ProtocolSeqHeader {
             seq: self.header.seq,
-            length: self.data.len() as u16 + 1,
-            message_type: self.header.message_type,
+            header: ProtocolPureHeader {
+                length: self.data.len() as u16 + 1,
+                message_type: self.header.header.message_type,
+            },
         };
-        let mut s = bincode::serialize::<ProtocolHeader>(&prob)?;
+        let mut s = bincode::serialize::<ProtocolSeqHeader>(&prob)?;
         v.append(&mut s);
         v.append(&mut self.data.clone());
         Ok(v)
@@ -106,28 +126,73 @@ pub fn get_protocol_from_bytes(data: &Vec<u8>) -> anyhow::Result<Vec<Protocol>> 
     while cur_pos + 5 <= data.len() {
         // info!("{} <= {}", cur_pos + 5, data.len());
         // info!("protocol body: {:?}", &data[cur_pos..cur_pos + 5]);
-        let protocol = bincode::deserialize::<ProtocolHeader>(&data[cur_pos..cur_pos + 5])?;
-        let d = &data[cur_pos + 5..cur_pos + 5 + protocol.length as usize - 1];
-        cur_pos += (5 + protocol.length - 1) as usize;
+        let protocol = bincode::deserialize::<ProtocolSeqHeader>(&data[cur_pos..cur_pos + 5])?;
+        let d = &data[cur_pos + 5..cur_pos + 5 + protocol.header.length as usize - 1];
+        cur_pos += (5 + protocol.header.length - 1) as usize;
         v.push(Protocol {
             header: protocol,
             data: d.to_vec(),
         });
     }
-    return Ok(v);
+    Ok(v)
 }
 
+// Sequence to Protocol Store
+pub struct ProtocolPackets {
+    matched_seq: Option<u16>,
+    packets: HashMap<u16, Protocol>,
+}
+
+impl ProtocolPackets {
+    pub fn new() -> ProtocolPackets {
+        ProtocolPackets {
+            packets: HashMap::new(),
+            matched_seq: None,
+        }
+    }
+    pub fn add(&mut self, protocol: Protocol) {
+        // don't add old packet
+        match self.matched_seq {
+            Some(seq) => {
+                if protocol.header.seq > seq {
+                    self.packets.entry(protocol.header.seq).or_insert(protocol);
+                }
+            }
+            None => {
+                self.packets.entry(protocol.header.seq).or_insert(protocol);
+            }
+        }
+    }
+    pub fn fetch_protocol(&mut self, seq: u16) -> Option<Protocol> {
+        let t = self.packets.remove(&seq);
+        if t.is_some() {
+            self.matched_seq = Some(seq);
+        }
+        t
+    }
+    pub fn len(&self) -> usize {
+        self.packets.len()
+    }
+    // show seq list in in_packets
+    pub fn show_seq_list(&self) {
+        for (k, _) in &self.packets {
+            info!("seq list: {:?}", *k);
+        }
+    }
+}
 mod tests {
     use super::*;
 
     #[test]
     fn pack_test() {
-        let prob = ProtocolHeader {
+        let prob = ProtocolSeqHeader {
             seq: 0x1234,
-            length: 0x4321,
-            message_type: 6,
+            header: ProtocolPureHeader {
+                length: 0x4321,
+                message_type: 6,
+            },
         };
-        let s = bincode::serialize::<ProtocolHeader>(&prob);
+        let s = bincode::serialize::<ProtocolSeqHeader>(&prob);
         assert!(s.is_ok());
         let s = s.unwrap();
         assert_eq!(s.len(), 5);
@@ -137,16 +202,16 @@ mod tests {
         assert_eq!(s[3], 0x43);
         assert_eq!(s[4], 6);
 
-        let de = bincode::deserialize::<ProtocolHeader>(&s);
+        let de = bincode::deserialize::<ProtocolSeqHeader>(&s);
         assert_eq!(de.is_ok(), true);
         let de = de.unwrap();
         assert_eq!(de.seq, 0x1234);
-        assert_eq!(de.length, 0x4321);
-        assert_eq!(de.message_type, 6);
+        assert_eq!(de.header.length, 0x4321);
+        assert_eq!(de.header.message_type, 6);
     }
     #[test]
     fn get_protocol() {
-        let mut i = vec![
+        let i = vec![
             3, 2, 0, 18, 0, 6, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 1, 0, 18, 0, 6,
             0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 24, 0, 3, 118, 98, 111, 120,
             117, 115, 101, 114, 0, 77, 65, 77, 69, 76, 79, 78, 32, 65, 45, 52, 51, 0, 1,
@@ -156,9 +221,9 @@ mod tests {
         let r = r.unwrap();
 
         assert_eq!(r.len(), 3);
-        assert_eq!(r[0].header.message_type, 6);
-        assert_eq!(r[1].header.message_type, 6);
-        assert_eq!(r[2].header.message_type, 3);
+        assert_eq!(r[0].header.header.message_type, 6);
+        assert_eq!(r[1].header.header.message_type, 6);
+        assert_eq!(r[2].header.header.message_type, 3);
         // assert_eq!(r[0].header.length, 18);
         // assert_eq!(r[1].header.length, 18);
         // assert_eq!(r[2].header.length, 24);
@@ -168,10 +233,49 @@ mod tests {
 
         // print protocols
         for p in r {
-            let pp = p.header.message_type;
-            let ppp = p.header.length;
+            let pp = p.header.header.message_type;
+            let _ppp = p.header.header.length;
             let pppp = p.header.seq;
             println!("protocol: {}, type: {}", pppp, pp,);
         }
+    }
+    #[test]
+    fn fetch_protocol() {
+        let mut store = ProtocolPackets::new();
+        let i = vec![
+            3, 2, 0, 18, 0, 6, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 1, 0, 18, 0, 6,
+            0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 24, 0, 3, 118, 98, 111, 120,
+            117, 115, 101, 114, 0, 77, 65, 77, 69, 76, 79, 78, 32, 65, 45, 52, 51, 0, 1,
+        ];
+        let mut p0 = Protocol::new(1, vec![1, 2, 3]);
+        p0.header.seq = 1;
+
+        let mut p1 = Protocol::new(2, vec![1, 2, 3]);
+        p1.header.seq = 2;
+
+        let mut p2 = Protocol::new(3, vec![1, 2, 3]);
+        p2.header.seq = 3;
+
+        store.add(p0);
+        store.add(p1);
+        store.add(p2);
+
+        let r = store.fetch_protocol(1);
+        assert!(r.is_some());
+        let mut p0 = Protocol::new(1, vec![1, 2, 3]);
+        p0.header.seq = 5;
+        store.add(p0);
+        let mut p0 = Protocol::new(1, vec![1, 2, 3]);
+        p0.header.seq = 5;
+        store.add(p0);
+        let r = store.fetch_protocol(4);
+        assert!(r.is_none());
+        let mut p0 = Protocol::new(4, vec![1, 2, 3]);
+        p0.header.seq = 4;
+        store.add(p0);
+        let r = store.fetch_protocol(4);
+        assert!(r.is_some());
+        let r = store.fetch_protocol(5);
+        assert!(r.is_some());
     }
 }
