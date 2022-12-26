@@ -180,8 +180,10 @@ impl ProtocolPackets {
         }
     }
 }
+
+#[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::protocol::*;
 
     #[test]
     fn pack_test() {
@@ -242,11 +244,6 @@ mod tests {
     #[test]
     fn fetch_protocol() {
         let mut store = ProtocolPackets::new();
-        let i = vec![
-            3, 2, 0, 18, 0, 6, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 1, 0, 18, 0, 6,
-            0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 24, 0, 3, 118, 98, 111, 120,
-            117, 115, 101, 114, 0, 77, 65, 77, 69, 76, 79, 78, 32, 65, 45, 52, 51, 0, 1,
-        ];
         let mut p0 = Protocol::new(1, vec![1, 2, 3]);
         p0.header.seq = 1;
 

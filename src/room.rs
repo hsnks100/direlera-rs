@@ -298,7 +298,7 @@ impl UserRoom {
             );
             data.push(i.1.borrow().game_status);
         }
-        let mut p = Protocol::new(USER_SERVER_STATUS, data);
+        let p = Protocol::new(USER_SERVER_STATUS, data);
         Ok(p)
     }
 
