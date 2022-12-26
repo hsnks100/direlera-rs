@@ -66,9 +66,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         session_manager,
         game_id: 0,
     };
-    let (r0, r1) = tokio::join!(server.run(), service_server.run());
-    r0?;
-    r1?;
+    // tokio::task::spawn(async move {
+    //     service_server.keepalive_timer().await;
+    // });
+    tokio::join!(
+        server.run(),
+        service_server.run(), /*service_server.keepalive_timer() */
+    );
 
     Ok(())
 }

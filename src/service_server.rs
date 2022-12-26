@@ -8,12 +8,16 @@ use serde::__private::from_utf8_lossy;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
+use std::sync::Arc;
+use tokio::select;
 
 use std::net::SocketAddr;
 use std::rc::Rc;
+use std::time::Duration;
 use std::time::Instant;
 
 use tokio::net::UdpSocket;
+use tokio::{task, time};
 
 pub struct ServiceServer {
     pub config: HashMap<String, String>,
@@ -28,15 +32,38 @@ impl ServiceServer {
     pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
         info!("Service Run");
         loop {
+            // let r = self.keepalive_timer;
+            // let r2 = self.service;
+            select! {
+                _ = self.keepalive_timer() => {
+                    info!("keepalive_timer");
+                }
+                _ = self.service() => {
+                    info!("service");
+                }
+            }
+        }
+    }
+
+    pub async fn service(&mut self) -> anyhow::Result<()> {
+        loop {
+            self.to_send = Some(self.socket.recv_from(&mut self.buf).await?);
             if let Some((size, peer)) = self.to_send {
                 let result = self.service_proc(size, peer).await;
                 if result.is_err() {
                     info!("err content: {:#?}", result.err());
                 }
             }
-            self.to_send = Some(self.socket.recv_from(&mut self.buf).await?);
         }
     }
+    pub async fn keepalive_timer(&mut self) -> anyhow::Result<()> {
+        let mut interval = tokio::time::interval(Duration::from_millis(1000));
+        loop {
+            interval.tick().await;
+            info!("timer!!");
+        }
+    }
+
     pub async fn service_proc(&mut self, size: usize, peer: SocketAddr) -> anyhow::Result<()> {
         // info!("service size: {}, ", size);
         let r = get_protocol_from_bytes(&self.buf[..size].to_vec())?;
