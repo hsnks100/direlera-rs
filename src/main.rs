@@ -3,14 +3,10 @@ use direlera_rs::accept_server::AcceptServer;
 use direlera_rs::room::*;
 use direlera_rs::service_server::{self, *};
 use log::{error, info, log_enabled, trace, warn, Level, LevelFilter};
-use std::cell::{RefCell, RefMut};
 use std::collections::HashMap;
+use std::env;
 use std::error::Error;
 use std::io::Write;
-use std::net::SocketAddr;
-use std::rc::Rc;
-use std::{env, io};
-use tokio::join;
 use tokio::net::UdpSocket;
 
 #[tokio::main]

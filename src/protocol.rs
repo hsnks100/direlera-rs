@@ -38,7 +38,7 @@ type GameStatus = u8;
 pub const GameStatusWaiting: GameStatus = 0;
 pub const GameStatusPlaying: GameStatus = 1;
 pub const GameStatusNetSync: GameStatus = 2;
-#[repr(C, packed)]
+// #[repr(C, packed)]
 #[derive(Serialize, Deserialize)]
 pub struct ProtocolHeader {
     pub seq: u16,
@@ -99,6 +99,7 @@ impl Protocol {
 }
 
 pub fn get_protocol_from_bytes(data: &Vec<u8>) -> anyhow::Result<Vec<Protocol>> {
+    info!("get_protocol_from_bytes: {:?}", data);
     let mut v = Vec::new();
 
     let mut cur_pos = 1;
@@ -114,4 +115,63 @@ pub fn get_protocol_from_bytes(data: &Vec<u8>) -> anyhow::Result<Vec<Protocol>> 
         });
     }
     return Ok(v);
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pack_test() {
+        let prob = ProtocolHeader {
+            seq: 0x1234,
+            length: 0x4321,
+            message_type: 6,
+        };
+        let s = bincode::serialize::<ProtocolHeader>(&prob);
+        assert!(s.is_ok());
+        let s = s.unwrap();
+        assert_eq!(s.len(), 5);
+        assert_eq!(s[0], 0x34);
+        assert_eq!(s[1], 0x12);
+        assert_eq!(s[2], 0x21);
+        assert_eq!(s[3], 0x43);
+        assert_eq!(s[4], 6);
+
+        let de = bincode::deserialize::<ProtocolHeader>(&s);
+        assert_eq!(de.is_ok(), true);
+        let de = de.unwrap();
+        assert_eq!(de.seq, 0x1234);
+        assert_eq!(de.length, 0x4321);
+        assert_eq!(de.message_type, 6);
+    }
+    #[test]
+    fn get_protocol() {
+        let mut i = vec![
+            3, 2, 0, 18, 0, 6, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 1, 0, 18, 0, 6,
+            0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 24, 0, 3, 118, 98, 111, 120,
+            117, 115, 101, 114, 0, 77, 65, 77, 69, 76, 79, 78, 32, 65, 45, 52, 51, 0, 1,
+        ];
+        let r = get_protocol_from_bytes(&i);
+        assert!(r.is_ok());
+        let r = r.unwrap();
+
+        assert_eq!(r.len(), 3);
+        assert_eq!(r[0].header.message_type, 6);
+        assert_eq!(r[1].header.message_type, 6);
+        assert_eq!(r[2].header.message_type, 3);
+        // assert_eq!(r[0].header.length, 18);
+        // assert_eq!(r[1].header.length, 18);
+        // assert_eq!(r[2].header.length, 24);
+        // assert_eq!(r[0].header.seq, 0);
+        // assert_eq!(r[1].header.seq, 0);
+        // assert_eq!(r[2].header.seq, 0);
+
+        // print protocols
+        for p in r {
+            let pp = p.header.message_type;
+            let ppp = p.header.length;
+            let pppp = p.header.seq;
+            println!("protocol: {}, type: {}", pppp, pp,);
+        }
+    }
 }
