@@ -39,6 +39,7 @@ pub struct User {
     pub put_cache: CacheSystem,
     pub s2c_ack_time: Instant,
     pub pings: Vec<i32>,
+    pub keepalive_time: Instant,
 }
 
 impl User {
@@ -65,6 +66,7 @@ impl User {
             put_cache: CacheSystem::new(),
             pings: Vec::new(),
             s2c_ack_time: Instant::now(),
+            keepalive_time: Instant::now(),
         }
     }
     pub fn reset_outcoming(&mut self) {
