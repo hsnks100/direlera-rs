@@ -216,6 +216,9 @@ impl ServiceServer {
                     .0
                     .to_vec();
                 data.append(&mut euc_kr);
+                const VERSION: &str = env!("CARGO_PKG_VERSION");
+                data.append(&mut b"\ndirelera version: ".to_vec());
+                data.append(&mut VERSION.as_bytes().to_vec());
                 data.push(0);
                 user.borrow_mut()
                     .make_send_packet(&mut self.socket, Protocol::new(SERVER_INFO, data))
