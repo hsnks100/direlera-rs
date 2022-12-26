@@ -8,8 +8,11 @@ use serde::__private::from_utf8_lossy;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::Arc;
+
 use tokio::select;
+
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
 
 use std::net::SocketAddr;
 use std::rc::Rc;
@@ -17,7 +20,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use tokio::net::UdpSocket;
-use tokio::{task, time};
+
 
 pub struct ServiceServer {
     pub config: HashMap<String, String>,
@@ -26,41 +29,81 @@ pub struct ServiceServer {
     pub to_send: Option<(usize, SocketAddr)>,
     pub session_manager: UserRoom,
     pub game_id: u32,
+    pub rx: Receiver<Event>,
+    pub tx: Sender<Event>,
 }
 
+#[derive(Debug)]
+pub enum Event {
+    KeepaliveTimer,
+}
 impl ServiceServer {
     pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
         info!("Service Run");
+
         loop {
             // let r = self.keepalive_timer;
             // let r2 = self.service;
             select! {
-                _ = self.keepalive_timer() => {
-                    info!("keepalive_timer");
+                _ = ServiceServer::keepalive_timer(self.tx.clone()) => {
                 }
                 _ = self.service() => {
-                    info!("service");
                 }
             }
         }
     }
 
-    pub async fn service(&mut self) -> anyhow::Result<()> {
-        loop {
-            self.to_send = Some(self.socket.recv_from(&mut self.buf).await?);
-            if let Some((size, peer)) = self.to_send {
-                let result = self.service_proc(size, peer).await;
-                if result.is_err() {
-                    info!("err content: {:#?}", result.err());
-                }
-            }
-        }
-    }
-    pub async fn keepalive_timer(&mut self) -> anyhow::Result<()> {
-        let mut interval = tokio::time::interval(Duration::from_millis(1000));
+    pub async fn keepalive_timer(tx: Sender<Event>) -> anyhow::Result<()> {
+        let mut interval = tokio::time::interval(Duration::from_millis(10000));
         loop {
             interval.tick().await;
-            info!("timer!!");
+            tx.send(Event::KeepaliveTimer).await?;
+        }
+    }
+    pub async fn keepalive_event(&mut self) -> anyhow::Result<()> {
+        // check user timeout
+        let now = Instant::now();
+        let mut timeout_users = vec![];
+        for (k, v) in self.session_manager.users.iter() {
+            if now.duration_since(v.borrow().keepalive_time) > Duration::from_secs(120) {
+                info!("timeout!!!: {:#?}", k);
+                timeout_users.push(*k);
+            }
+        }
+        for i in timeout_users.iter() {
+            let user = self.session_manager.get_user(*i)?;
+            let _ = self.fun_quit_game(user.clone()).await;
+            // send quit message to all
+            let mut data = Vec::new();
+            data.append(&mut user.borrow().name.clone());
+            data.push(0u8);
+            data.append(&mut bincode::serialize(&user.borrow().user_id)?);
+            data.append(&mut b"time out\x00".to_vec());
+            for (_addr, u) in &self.session_manager.users {
+                u.borrow_mut()
+                    .make_send_packet(&mut self.socket, Protocol::new(USER_QUIT, data.clone()))
+                    .await?;
+            }
+            self.session_manager.users.remove(i);
+        }
+        Ok(())
+    }
+    pub async fn service(&mut self) -> anyhow::Result<()> {
+        loop {
+            select! {
+                _ = self.rx.recv() => {
+                    self.keepalive_event().await?;
+                }
+                ts = self.socket.recv_from(&mut self.buf) => {
+                    self.to_send = Some(ts?);
+                    if let Some((size, peer)) = self.to_send {
+                        let result = self.service_proc(size, peer).await;
+                        if result.is_err() {
+                            info!("err content: {:#?}", result.err());
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -124,6 +167,7 @@ impl ServiceServer {
                 "keepalive user name: {}",
                 String::from_utf8_lossy(user.borrow().name.clone().as_slice())
             );
+            user.borrow_mut().keepalive_time = Instant::now();
         } else if message.header.header.message_type == CREATE_GAME {
             self.svc_create_game(message.data.clone(), peer).await?;
         } else if message.header.header.message_type == QUIT_GAME {
@@ -153,7 +197,7 @@ impl ServiceServer {
         user: Rc<RefCell<User>>,
     ) -> anyhow::Result<()> {
         info!("== svc_user_quit ==");
-        let _ = self.fun_quit_game(buf.clone(), user.clone()).await;
+        let _ = self.fun_quit_game(user.clone()).await;
 
         let client_message = &buf[3..];
         // send quit message to all
@@ -493,11 +537,7 @@ impl ServiceServer {
 
         Ok(())
     }
-    pub async fn fun_quit_game(
-        &mut self,
-        _buf: Vec<u8>,
-        user: Rc<RefCell<User>>,
-    ) -> anyhow::Result<()> {
+    pub async fn fun_quit_game(&mut self, user: Rc<RefCell<User>>) -> anyhow::Result<()> {
         if !user.borrow().in_room {
             anyhow::bail!("not exist in room")
         }
@@ -573,10 +613,10 @@ impl ServiceServer {
     }
     pub async fn svc_quit_game(
         &mut self,
-        buf: Vec<u8>,
+        _buf: Vec<u8>,
         user: Rc<RefCell<User>>,
     ) -> anyhow::Result<()> {
-        self.fun_quit_game(buf, user).await
+        self.fun_quit_game(user).await
     }
 
     pub async fn svc_start_game(

@@ -8,6 +8,9 @@ use std::env;
 use std::error::Error;
 use std::io::Write;
 use tokio::net::UdpSocket;
+use tokio::sync::mpsc;
+
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -58,6 +61,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let session_manager = UserRoom::new();
     let sub_port = config_obj.get("sub_port").unwrap();
     let service_sock = UdpSocket::bind(&format!("0.0.0.0:{}", sub_port)).await?;
+    let (tx, rx) = mpsc::channel(32);
     let mut service_server = ServiceServer {
         config: config_obj,
         socket: service_sock,
@@ -65,10 +69,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         to_send: None,
         session_manager,
         game_id: 0,
+        rx,
+        tx,
     };
-    // tokio::task::spawn(async move {
-    //     service_server.keepalive_timer().await;
-    // });
+    // tokio::spawn(async move {
+    //     service_server.keepalive_event().await;
+    // }.await;
+
     tokio::join!(
         server.run(),
         service_server.run(), /*service_server.keepalive_timer() */
