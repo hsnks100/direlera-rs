@@ -21,7 +21,6 @@ use std::time::Instant;
 
 use tokio::net::UdpSocket;
 
-
 pub struct ServiceServer {
     pub config: HashMap<String, String>,
     pub socket: UdpSocket,
@@ -131,6 +130,7 @@ impl ServiceServer {
                 .into())
             }
         };
+        user.borrow_mut().keepalive_time = Instant::now();
         info!(
             "remain in_packets len: {}, want: {}",
             user.borrow().in_packets.len(),
