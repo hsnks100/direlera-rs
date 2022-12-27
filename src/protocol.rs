@@ -119,7 +119,6 @@ impl Protocol {
 }
 
 pub fn get_protocol_from_bytes(data: &Vec<u8>) -> anyhow::Result<Vec<Protocol>> {
-    info!("get_protocol_from_bytes: {:?}", data);
     let mut v = Vec::new();
 
     let mut cur_pos = 1;

@@ -131,11 +131,6 @@ impl ServiceServer {
             }
         };
         user.borrow_mut().keepalive_time = Instant::now();
-        info!(
-            "remain in_packets len: {}, want: {}",
-            user.borrow().in_packets.len(),
-            want_seq
-        );
         user.borrow().in_packets.show_seq_list();
         // let messages: Vec<_> = r
         //     .iter()
@@ -657,14 +652,14 @@ impl ServiceServer {
             u.player_status = Playing;
 
             let mut data = Vec::new();
-            data.push(0u8);
             let frame_delay = Self::cal_frame_delay(u.connect_type, u.ping);
             info!("frame_delay: {}", frame_delay);
             let mut notice_message = u.name.clone();
-            notice_message.append(&mut ", frame delay: ".to_string().into_bytes());
+            notice_message.append(&mut ", frame delay(index): ".to_string().into_bytes());
             notice_message.append(&mut frame_delay.to_string().into_bytes());
             notice_message.push(0u8);
             delay_messages.push(notice_message.clone());
+            data.push(0u8);
             data.append(&mut bincode::serialize(&frame_delay)?);
             data.push(order + 1);
             data.push(user_room.borrow().players.len() as u8);
@@ -714,49 +709,49 @@ impl ServiceServer {
                 _ => 22,
             },
             2 => match ping {
-                0..=33 => 3,
-                34..=66 => 5,
-                67..=99 => 7,
-                100..=133 => 9,
-                134..=166 => 11,
-                167..=199 => 13,
-                200..=233 => 15,
-                234..=266 => 17,
-                267..=299 => 19,
-                300..=333 => 21,
-                _ => 23,
+                0..=33 => 1,
+                34..=66 => 2,
+                67..=99 => 3,
+                100..=133 => 4,
+                134..=166 => 5,
+                167..=199 => 6,
+                200..=233 => 7,
+                234..=266 => 8,
+                267..=299 => 9,
+                300..=333 => 10,
+                _ => 11,
             },
             3 => match ping {
-                0..=49 => 5,
-                50..=99 => 8,
-                100..=149 => 11,
-                150..=199 => 14,
-                200..=249 => 17,
-                250..=299 => 20,
-                300..=349 => 23,
-                _ => 26,
+                0..=49 => 1,
+                50..=99 => 2,
+                100..=149 => 3,
+                150..=199 => 4,
+                200..=249 => 5,
+                250..=299 => 6,
+                300..=349 => 7,
+                _ => 8,
             },
             4 => match ping {
-                0..=66 => 7,
-                67..=133 => 11,
-                134..=199 => 15,
-                200..=266 => 19,
-                267..=333 => 23,
-                _ => 27,
+                0..=66 => 1,
+                67..=133 => 2,
+                134..=199 => 3,
+                200..=266 => 4,
+                267..=333 => 5,
+                _ => 6,
             },
             5 => match ping {
-                0..=83 => 9,
-                84..=166 => 14,
-                167..=249 => 19,
-                250..=333 => 24,
-                _ => 29,
+                0..=83 => 1,
+                84..=166 => 2,
+                167..=249 => 3,
+                250..=333 => 4,
+                _ => 5,
             },
             6 => match ping {
-                0..=99 => 11,
-                100..=199 => 17,
-                200..=299 => 23,
-                300..=399 => 29,
-                _ => 35,
+                0..=99 => 1,
+                100..=199 => 2,
+                200..=299 => 3,
+                300..=399 => 4,
+                _ => 5,
             },
             _ => 1_u16,
         }
@@ -772,10 +767,6 @@ impl ServiceServer {
             anyhow::bail!("..");
         }
         let game_data = &buf[3..3 + game_data_length];
-        info!(
-            "================== svc_game_data: {:?} ==================",
-            game_data.clone()
-        );
 
         let user_room = self.session_manager.get_room(user.borrow().game_room_id)?;
         let target_user_index = user.borrow().player_index as usize;
@@ -791,7 +782,6 @@ impl ServiceServer {
         }
         // InputProcess
         self.input_process(buf.clone(), user.clone()).await?;
-        info!("================== svc_game_data good ==================");
         Ok(())
     }
     pub async fn svc_game_cache(
@@ -1015,7 +1005,7 @@ impl ServiceServer {
             let mut u = u.borrow_mut();
             u.make_send_packet(
                 &mut self.socket,
-                Protocol::new(READY_TO_PLAY_SIGNAL, data.clone()),
+                Protocol::new(READY_TO_PLAY_SIGNAL, b"\x00".to_vec()),
             )
             .await?;
         }
