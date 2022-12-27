@@ -1,11 +1,10 @@
-use std::error::Error;
 use std::fmt;
-use std::str::from_utf8_unchecked_mut;
+
 use std::time::Instant;
 
 use crate::cache_system::*;
 use crate::protocol::*;
-use log::{error, info, log_enabled, trace, warn, Level, LevelFilter};
+use log::error;
 use serde::__private::from_utf8_lossy;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -18,6 +17,7 @@ pub const Playing: PlayerStatus = 0;
 pub const Idle: PlayerStatus = 1;
 type PlayerInput = Vec<u8>;
 pub struct User {
+    // pub packets: ProtocolPackets,
     pub ip_addr: SocketAddr,
     pub user_id: u16,
     pub name: Vec<u8>,
@@ -31,13 +31,15 @@ pub struct User {
     pub game_room_id: u32,
     pub in_room: bool,
     pub room_order: u8,
-    pub packets: Vec<Protocol>,
+    pub out_packets: Vec<Protocol>,
+    pub in_packets: ProtocolPackets,
     pub player_index: u8,
     pub players_input: Vec<Vec<u8>>,
     pub cache_system: CacheSystem,
     pub put_cache: CacheSystem,
     pub s2c_ack_time: Instant,
     pub pings: Vec<i32>,
+    pub keepalive_time: Instant,
 }
 
 impl User {
@@ -56,13 +58,15 @@ impl User {
             in_room: false,
             room_order: 0,
             ip_addr,
-            packets: Vec::new(),
+            out_packets: Vec::new(),
+            in_packets: ProtocolPackets::new(),
             player_index: 0,
             players_input: Vec::new(),
             cache_system: CacheSystem::new(),
             put_cache: CacheSystem::new(),
             pings: Vec::new(),
             s2c_ack_time: Instant::now(),
+            keepalive_time: Instant::now(),
         }
     }
     pub fn reset_outcoming(&mut self) {
@@ -81,14 +85,14 @@ impl User {
         // self.server_socket.send_to(b"hihi", self.ip_addr).await?;
         let ip_addr = self.ip_addr;
         p.header.seq = self.send_count;
-        self.packets.push(p);
-        let extra_packets = cmp::min(3, self.packets.len());
+        self.out_packets.push(p);
+        let extra_packets = cmp::min(3, self.out_packets.len());
         let mut packet = Vec::new();
         packet.push(extra_packets as u8);
-        let packetLen = self.packets.len();
+        let packetLen = self.out_packets.len();
         for i in 0..extra_packets {
             let prev_procotol = self
-                .packets
+                .out_packets
                 .get_mut(packetLen - 1 - i)
                 .ok_or(KailleraError::NotFound)?;
             let mut prev_packet = prev_procotol.make_packet()?;
@@ -120,7 +124,7 @@ impl Room {
             game_status: 0,
         }
     }
-    pub fn player_count(self: &Self) -> usize {
+    pub fn player_count(&self) -> usize {
         self.players.iter().filter(|&n| n.is_some()).count()
     }
 }
@@ -133,9 +137,11 @@ pub enum KailleraError {
     TokenError,
     #[error("{}, pos: {}", .message, .pos)]
     AlreadyError { message: String, pos: usize },
-    #[error("notfound error")]
-    GameStatusError { message: String },
     #[error("gamestatus error")]
+    GameStatusError { message: String },
+    #[error("notfound seq")]
+    NotFoundSeq { wanted_seq: u16, cur_seq: u16 },
+    #[error("notfound error")]
     NotFound,
 }
 
@@ -161,20 +167,20 @@ impl fmt::Display for UserRoom {
             );
         }
         // game room information
-        for (addr, r) in &self.rooms {
+        for (_addr, r) in &self.rooms {
             let r = r.borrow();
             ret += &format!(
                 "game_id: {}, game_name: {}, ",
                 r.game_id,
-                r.game_name.clone()[..3].to_string(),
+                &r.game_name.clone()[..3],
             );
-            ret += &format!("players: [");
+            ret += "players: [";
             let mut comma = "".to_string();
             for p in &r.players {
                 ret += &format!("{} {:?}", comma, p);
                 comma = ", ".to_string();
             }
-            ret += &"\n".to_string();
+            ret += "\n";
         }
         write!(f, "{}", ret)
     }
@@ -197,7 +203,7 @@ impl UserRoom {
 
         let mut all_input = true;
         for i in 0..players_num {
-            let l = match user.borrow().players_input.get(i as usize) {
+            let l = match user.borrow().players_input.get(i) {
                 Some(i) => i.len() as u8,
                 None => break,
             };
@@ -212,7 +218,7 @@ impl UserRoom {
 
         let mut ret = Vec::new();
         for _ in 0..require_inputs {
-            for i in 0..(players_num as usize) {
+            for i in 0..players_num {
                 {
                     let mut t = user.borrow().players_input[i].clone()[..2].to_vec();
                     ret.append(&mut t);
@@ -234,9 +240,9 @@ impl UserRoom {
         let user = self.users.get(&ip_addr).ok_or(KailleraError::NotFound)?;
         Ok(user.clone())
     }
-    pub fn add_room(self: &mut Self, ch: u32, r: Room) -> Result<(), KailleraError> {
+    pub fn add_room(&mut self, ch: u32, r: Room) -> Result<(), KailleraError> {
         match self.rooms.get(&ch) {
-            Some(s) => {
+            Some(_s) => {
                 return Err(KailleraError::AlreadyError {
                     message: "room is already exist".to_string(),
                     pos: 0,
@@ -248,20 +254,16 @@ impl UserRoom {
         }
         Ok(())
     }
-    pub fn delete_room(self: &mut Self, ch: u32) -> Result<(), KailleraError> {
+    pub fn delete_room(&mut self, ch: u32) -> Result<(), KailleraError> {
         match self.rooms.remove(&ch) {
-            Some(s) => {}
+            Some(_s) => {}
             None => {
                 return Err(KailleraError::NotFound);
             }
         }
         Ok(())
     }
-    pub fn make_server_status(
-        self: &Self,
-        seq: u16,
-        exclude: SocketAddr,
-    ) -> anyhow::Result<Protocol> {
+    pub fn make_server_status(&self, exclude: SocketAddr) -> anyhow::Result<Protocol> {
         let mut data = Vec::new();
         data.push(0u8);
         data.append(&mut bincode::serialize::<u32>(
@@ -298,8 +300,34 @@ impl UserRoom {
             );
             data.push(i.1.borrow().game_status);
         }
-        let mut p = Protocol::new(USER_SERVER_STATUS, data);
-        p.header.seq = seq;
+        let p = Protocol::new(USER_SERVER_STATUS, data);
         Ok(p)
+    }
+
+    // send GAME_CHAT to players of room
+    pub async fn send_game_chat_to_players(
+        &mut self,
+        server_socket: &mut UdpSocket,
+        room: Rc<RefCell<Room>>,
+        who: String,
+        message: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        // send GAME_CHAT to players of room
+        for i in &room.borrow().players {
+            let mut data = Vec::new();
+            data.append(&mut who.clone().into_bytes());
+            data.push(0u8);
+            data.append(&mut message.clone());
+            match i {
+                Some(i) => {
+                    let u = self.get_user(*i)?;
+                    u.borrow_mut()
+                        .make_send_packet(server_socket, Protocol::new(GAME_CHAT, data))
+                        .await?;
+                }
+                None => {}
+            }
+        }
+        Ok(())
     }
 }

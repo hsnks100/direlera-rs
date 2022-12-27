@@ -1,9 +1,9 @@
-use log::{error, info, log_enabled, trace, warn, Level, LevelFilter};
+use log::{info};
 use std::collections::HashMap;
-use std::error::Error;
+
 use std::net::SocketAddr;
-use std::{env, io};
-use tokio::join;
+use std::{io};
+
 use tokio::net::UdpSocket;
 pub struct AcceptServer {
     pub socket: UdpSocket,
@@ -31,11 +31,11 @@ impl AcceptServer {
                 if size == 5 {
                     let ping = b"PING\x00";
                     if ping == &buf[..size] {
-                        let amt = socket.send_to("PONG\x00".as_bytes(), &peer).await?;
+                        let _amt = socket.send_to("PONG\x00".as_bytes(), &peer).await?;
                     }
                 } else if size > 5 && &buf[..5] == "HELLO".as_bytes() {
                     let sub_port = config_obj.get("sub_port").unwrap();
-                    let amt = socket
+                    let _amt = socket
                         .send_to(format!("HELLOD00D{}\x00", sub_port).as_bytes(), &peer)
                         .await?;
                 }
