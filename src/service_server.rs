@@ -64,7 +64,7 @@ impl ServiceServer {
         let now = Instant::now();
         let mut timeout_users = vec![];
         for (k, v) in self.session_manager.users.iter() {
-            if now.duration_since(v.borrow().keepalive_time) > Duration::from_secs(120) {
+            if now.duration_since(v.borrow().keepalive_time) > Duration::from_secs(240) {
                 info!("timeout!!!: {:#?}", k);
                 timeout_users.push(*k);
             }
@@ -767,6 +767,10 @@ impl ServiceServer {
             anyhow::bail!("..");
         }
         let game_data = &buf[3..3 + game_data_length];
+        let conntype = user.borrow().connect_type as u8;
+        user.borrow_mut().atomic_input_size = game_data.len() as u8 / conntype;
+        info!("atomic_input_size: {}", user.borrow().atomic_input_size);
+        info!("game_data: {:?}", game_data);
 
         let user_room = self.session_manager.get_room(user.borrow().game_room_id)?;
         let target_user_index = user.borrow().player_index as usize;
@@ -816,6 +820,7 @@ impl ServiceServer {
         let user_room = self.session_manager.get_room(user.borrow().game_room_id)?;
         // create packet each player
         for i in user_room.borrow().players.iter() {
+            // select user to send data
             let u = match i {
                 Some(i) => self.session_manager.get_user(*i)?,
                 None => continue,
@@ -828,7 +833,6 @@ impl ServiceServer {
                         .borrow()
                         .put_cache
                         .get_cache_position(data_to_send_to_user.clone());
-
                     match t {
                         Ok(cache_position) => {
                             let mut data = Vec::new();

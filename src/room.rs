@@ -1,5 +1,6 @@
 use std::fmt;
 
+use std::sync::atomic;
 use std::time::Instant;
 
 use crate::cache_system::*;
@@ -24,6 +25,7 @@ pub struct User {
     pub emul_name: String,
     pub ping: u32,
     pub connect_type: u8,
+    pub atomic_input_size: u8,
     pub player_status: PlayerStatus,
     pub ack_count: u32,
     pub send_count: u16,
@@ -50,6 +52,7 @@ impl User {
             emul_name: "".to_string(),
             ping: 0,
             connect_type: 0,
+            atomic_input_size: 0,
             player_status: Idle,
             ack_count: 0,
             send_count: 0,
@@ -199,15 +202,15 @@ impl UserRoom {
     // 각 유저는 다른 플레이어에 대한 입력키를 다 가지고 있다.
     // user 에게 보낼 입력데이터를 만드는 함수
     pub fn gen_input(user: Rc<RefCell<User>>, players_num: usize) -> anyhow::Result<Vec<u8>> {
-        let require_inputs = user.borrow().connect_type;
-
+        let conntype = user.borrow().connect_type;
+        let atomic_length = user.borrow().atomic_input_size;
         let mut all_input = true;
         for i in 0..players_num {
             let l = match user.borrow().players_input.get(i) {
                 Some(i) => i.len() as u8,
                 None => break,
             };
-            if l < require_inputs * 2 {
+            if l < conntype * atomic_length {
                 all_input = false;
                 break;
             }
@@ -217,15 +220,16 @@ impl UserRoom {
         }
 
         let mut ret = Vec::new();
-        for _ in 0..require_inputs {
+        for _ in 0..conntype {
             for i in 0..players_num {
                 {
-                    let mut t = user.borrow().players_input[i].clone()[..2].to_vec();
+                    let mut t =
+                        user.borrow().players_input[i].clone()[..atomic_length as usize].to_vec();
                     ret.append(&mut t);
                 }
                 {
                     let t = &mut user.borrow_mut().players_input[i];
-                    *t = t[2..].to_vec();
+                    *t = t[atomic_length as usize..].to_vec();
                 }
             }
         }
