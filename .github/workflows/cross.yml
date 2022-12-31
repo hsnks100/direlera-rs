@@ -18,3 +18,4 @@ jobs:
       with: 
         tag_name: ${{ steps.extract_version_name.outputs.version }} 
         release_name: ${{ steps.extract_version_name.outputs.version }} 
+        
