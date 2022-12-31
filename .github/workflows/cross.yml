@@ -1,8 +1,7 @@
 name: Release Tag
 on:
-  push:
-    branches:
-      - master
+  release:
+    types: [created]
 
 jobs:
   release:
