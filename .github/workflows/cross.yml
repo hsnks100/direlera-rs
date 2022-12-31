@@ -17,7 +17,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: stable-x86_64-pc-windows-msvc
+          target: i686-pc-windows-msvc
           override: true
       - uses: actions-rs/cargo@v1
         with:
@@ -28,7 +28,7 @@ jobs:
         with:
           use-cross: true
           command: build
-          args: --release --target stable-x86_64-pc-windows-msvc
+          args: --release --target i686-pc-windows-msvc
       - name: 디렉토리 정보
         run: |
           ls target/ -alh
