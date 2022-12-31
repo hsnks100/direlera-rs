@@ -1,28 +1,20 @@
-# We could use `@actions-rs/cargo` Action ability to automatically install `cross` tool
-# in order to compile our application for some unusual targets.
-
-on: [push, pull_request]
-
-name: Cross-compile
-
+name: Release Tag
+on:
+  push:
+    branches:
+      - master
 jobs:
   build:
-    name: Build
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - armv7-unknown-linux-gnueabihf
-          - powerpc64-unknown-linux-gnu
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command: build
-          args: --release --target=${{ matrix.target }}
+    - uses: actions/checkout@v2
+    - name: 버전 정보 추출
+      run: echo "##[set-output name=version;]$(echo '${{ github.event.head_commit.message }}' | egrep -o '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')"
+      id: extract_version_name       
+    - name: Release 생성 
+      uses: actions/create-release@v1
+      env: 
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with: 
+        tag_name: ${{ steps.extract_version_name.outputs.version }} 
+        release_name: ${{ steps.extract_version_name.outputs.version }} 
