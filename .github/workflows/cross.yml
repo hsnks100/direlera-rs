@@ -14,14 +14,25 @@ jobs:
           toolchain: stable
           target: armv7-unknown-linux-gnueabihf
           override: true
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: stable-x86_64-pc-windows-msvc
+          override: true
       - uses: actions-rs/cargo@v1
         with:
           use-cross: true
           command: build
-          args: --target armv7-unknown-linux-gnueabihf
+          args: --release --target armv7-unknown-linux-gnueabihf
+      - uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: build
+          args: --release --target stable-x86_64-pc-windows-msvc
       - name: 디렉토리 정보
         run: |
           ls target/ -alh
+
   build:
     runs-on: ubuntu-latest
     steps:
