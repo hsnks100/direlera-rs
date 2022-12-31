@@ -19,6 +19,9 @@ jobs:
           use-cross: true
           command: build
           args: --target armv7-unknown-linux-gnueabihf
+      - name: 디렉토리 정보
+        run: |
+          ls target/ -alh
   build:
     runs-on: ubuntu-latest
     steps:
