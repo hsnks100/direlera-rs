@@ -18,7 +18,7 @@ jobs:
         args: --release --target=${{ matrix.target }}
         use-cross: ${{ matrix.cross }}
       run: |
-          zip --junk-paths my-artifact README.md
+        zip --junk-paths my-artifact README.md
     - name: Release 생성 
       uses: actions/create-release@v1
       env: 
