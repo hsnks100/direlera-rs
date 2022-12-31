@@ -36,10 +36,10 @@ pub const SERVER_INFO: MessageT = 0x17;
 // ProtocolPacketsSize = 1,
 // ProtocolBodySize = 5,
 
-type GameStatus = u8;
-pub const GameStatusWaiting: GameStatus = 0;
-pub const GameStatusPlaying: GameStatus = 1;
-pub const GameStatusNetSync: GameStatus = 2;
+pub type GameStatus = u8;
+pub const GAME_STATUS_WAITING: GameStatus = 0;
+pub const GAME_STATUS_PLAYING: GameStatus = 1;
+pub const GAME_STATUS_NET_SYNC: GameStatus = 2;
 // #[repr(C, packed)]
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -139,7 +139,7 @@ pub fn get_protocol_from_bytes(data: &Vec<u8>) -> anyhow::Result<Vec<Protocol>> 
 // Sequence to Protocol Store
 pub struct ProtocolPackets {
     matched_seq: Option<u16>,
-    packets: HashMap<u16, Protocol>,
+    pub packets: HashMap<u16, Protocol>,
 }
 
 impl ProtocolPackets {

@@ -1,5 +1,6 @@
 use std::fmt;
 
+use log::{info, trace};
 use std::sync::atomic;
 use std::time::Instant;
 
@@ -106,14 +107,37 @@ impl User {
         Ok(())
     }
 }
+
+#[derive(Debug, Copy, Clone)]
+pub enum PlayerAddr {
+    Playing(SocketAddr),
+    Idle(SocketAddr),
+    None,
+}
+
+impl PlayerAddr {
+    fn is_none(&self) -> bool {
+        match self {
+            PlayerAddr::None => true,
+            _ => false,
+        }
+    }
+    fn is_playing(&self) -> bool {
+        match self {
+            PlayerAddr::Playing(_) => true,
+            _ => false,
+        }
+    }
+}
 #[derive(Debug)]
 pub struct Room {
     pub game_name: String,
     pub game_id: u32,
     pub emul_name: String,
     pub creator_id: String,
-    pub players: Vec<Option<SocketAddr>>,
-    pub game_status: u8,
+    // quitting user in game is None
+    pub players: Vec<PlayerAddr>,
+    pub game_status: GameStatus,
 }
 
 impl Room {
@@ -127,8 +151,17 @@ impl Room {
             game_status: 0,
         }
     }
-    pub fn player_count(&self) -> usize {
-        self.players.iter().filter(|&n| n.is_some()).count()
+    pub fn player_some_count(&self) -> usize {
+        self.players
+            .iter()
+            .filter(|&n| {
+                if let PlayerAddr::None = n {
+                    false
+                } else {
+                    true
+                }
+            })
+            .count()
     }
 }
 
@@ -146,6 +179,8 @@ pub enum KailleraError {
     NotFoundSeq { wanted_seq: u16, cur_seq: u16 },
     #[error("notfound error")]
     NotFound,
+    #[error("notfound user")]
+    NotFoundUser { message: String },
 }
 
 pub struct UserRoom {
@@ -201,11 +236,30 @@ impl UserRoom {
 
     // 각 유저는 다른 플레이어에 대한 입력키를 다 가지고 있다.
     // user 에게 보낼 입력데이터를 만드는 함수
-    pub fn gen_input(user: Rc<RefCell<User>>, players_num: usize) -> anyhow::Result<Vec<u8>> {
+    pub fn gen_input(user: Rc<RefCell<User>>, room: Rc<RefCell<Room>>) -> anyhow::Result<Vec<u8>> {
         let conntype = user.borrow().connect_type;
+        let players_num = room.borrow().players.len();
         let atomic_length = user.borrow().atomic_input_size;
         let mut all_input = true;
         for i in 0..players_num {
+            debug!(
+                "user name: {}, player num: {}, player exist: {}",
+                String::from_utf8_lossy(&user.borrow().name),
+                i,
+                !room.borrow().players[i].is_none()
+            );
+        }
+        for i in 0..players_num {
+            let is_exist_user = room.borrow().players[i].is_playing();
+            if !is_exist_user {
+                info!("because user is not exist, make game data");
+                let t = &mut user.borrow_mut().players_input[i];
+                let require_bytes = conntype * atomic_length as u8;
+                if t.len() < require_bytes as usize {
+                    t.append(&mut vec![0; require_bytes as usize - t.len()]);
+                }
+                assert!(t.len() >= require_bytes as usize);
+            }
             let l = match user.borrow().players_input.get(i) {
                 Some(i) => i.len() as u8,
                 None => break,
@@ -298,7 +352,7 @@ impl UserRoom {
             data.append(&mut i.1.borrow().creator_id.clone().into_bytes());
             data.push(0u8);
             data.append(
-                &mut format!("{}/{}\x00", i.1.borrow().player_count(), 4)
+                &mut format!("{}/{}\x00", i.1.borrow().player_some_count(), 4)
                     .as_bytes()
                     .to_vec(),
             );
@@ -323,13 +377,13 @@ impl UserRoom {
             data.push(0u8);
             data.append(&mut message.clone());
             match i {
-                Some(i) => {
+                PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => {
                     let u = self.get_user(*i)?;
                     u.borrow_mut()
                         .make_send_packet(server_socket, Protocol::new(GAME_CHAT, data))
                         .await?;
                 }
-                None => {}
+                PlayerAddr::None => {}
             }
         }
         Ok(())

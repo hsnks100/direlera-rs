@@ -109,10 +109,23 @@ impl ServiceServer {
     pub async fn service_proc(&mut self, size: usize, peer: SocketAddr) -> anyhow::Result<()> {
         // info!("service size: {}, ", size);
         let r = get_protocol_from_bytes(&self.buf[..size].to_vec())?;
+        if r.len() == 0 {
+            info!("protocol length: 0");
+        }
         let user = {
             match self.session_manager.users.get(&peer) {
                 Some(i) => i.clone(),
-                None => Rc::new(RefCell::new(User::new(peer))),
+                None => {
+                    if r.len() == 1 && r[0].header.seq == 0 {
+                        info!("new user: insert");
+                        Rc::new(RefCell::new(User::new(peer)))
+                    } else {
+                        return Err(KailleraError::NotFoundUser {
+                            message: format!("{:?}", r[0]),
+                        }
+                        .into());
+                    }
+                }
             }
         };
         for i in r.iter() {
@@ -123,11 +136,18 @@ impl ServiceServer {
         let message = match message {
             Some(i) => i,
             None => {
+                info!(
+                    "user name: {}",
+                    String::from_utf8_lossy(&user.borrow().name.clone())
+                );
+                for i in &user.borrow().in_packets.packets {
+                    info!("seq: {}", i.1.header.seq);
+                }
                 return Err(KailleraError::NotFoundSeq {
                     wanted_seq: want_seq,
                     cur_seq: 9999,
                 }
-                .into())
+                .into());
             }
         };
         user.borrow_mut().keepalive_time = Instant::now();
@@ -166,6 +186,7 @@ impl ServiceServer {
         } else if message.header.header.message_type == CREATE_GAME {
             self.svc_create_game(message.data.clone(), peer).await?;
         } else if message.header.header.message_type == QUIT_GAME {
+            info!("ON QUIT_GAME");
             self.svc_quit_game(message.data.clone(), user).await?;
         } else if message.header.header.message_type == JOIN_GAME {
             self.svc_join_game(message.data.clone(), peer).await?;
@@ -178,6 +199,7 @@ impl ServiceServer {
         } else if message.header.header.message_type == GAME_CACHE {
             self.svc_game_cache(message.data.clone(), user).await?;
         } else if message.header.header.message_type == DROP_GAME {
+            info!("ON DROP_GAME");
             self.svc_drop_game(message.data.clone(), user).await?;
         } else if message.header.header.message_type == READY_TO_PLAY_SIGNAL {
             self.svc_ready_to_playsignal(message.data.clone(), user)
@@ -357,7 +379,8 @@ impl ServiceServer {
 
             for i in ips {
                 match i {
-                    Some(s) => {
+                    PlayerAddr::None => {}
+                    PlayerAddr::Playing(s) => {
                         let u = self.session_manager.get_user(s)?;
                         let mut data = Vec::new();
                         data.append(&mut user.borrow().name.clone());
@@ -367,9 +390,17 @@ impl ServiceServer {
                             .make_send_packet(&mut self.socket, Protocol::new(GAME_CHAT, data))
                             .await?;
                     }
-                    None => {}
+                    PlayerAddr::Idle(s) => {
+                        let u = self.session_manager.get_user(s)?;
+                        let mut data = Vec::new();
+                        data.append(&mut user.borrow().name.clone());
+                        data.push(0u8);
+                        data.append(&mut buf.clone()[1..].to_vec());
+                        u.borrow_mut()
+                            .make_send_packet(&mut self.socket, Protocol::new(GAME_CHAT, data))
+                            .await?;
+                    }
                 }
-                if i.is_some() {}
             }
         }
         Ok(())
@@ -410,8 +441,10 @@ impl ServiceServer {
         self.game_id += 1;
         new_room.game_name =
             String::from_utf8_lossy(iter.get(1).ok_or(KailleraError::NotFound)?).to_string();
-        new_room.game_status = GameStatusWaiting;
-        new_room.players.push(Some(user.borrow().ip_addr));
+        new_room.game_status = GAME_STATUS_WAITING;
+        new_room
+            .players
+            .push(PlayerAddr::Idle(user.borrow().ip_addr));
         // update game status
         {
             for (_, user) in &self.session_manager.users {
@@ -419,7 +452,7 @@ impl ServiceServer {
                 data.push(0u8);
                 data.append(&mut bincode::serialize::<u32>(&new_room.game_id)?);
                 data.push(new_room.game_status);
-                data.push(new_room.player_count() as u8);
+                data.push(new_room.player_some_count() as u8);
                 data.push(4u8);
                 user.borrow_mut()
                     .make_send_packet(&mut self.socket, Protocol::new(UPDATE_GAME_STATUS, data))
@@ -465,7 +498,7 @@ impl ServiceServer {
         let user = user_room.get_user(ip_addr)?;
         let _conn_type = buf.get(12).ok_or(KailleraError::NotFound);
         let join_room = self.session_manager.get_room(game_id)?;
-        if join_room.borrow().game_status != GameStatusWaiting {
+        if join_room.borrow().game_status != GAME_STATUS_WAITING {
             return Err(KailleraError::GameStatusError {
                 message: "game is playing".to_string(),
             }
@@ -475,7 +508,7 @@ impl ServiceServer {
         join_room
             .borrow_mut()
             .players
-            .push(Some(user.borrow().ip_addr));
+            .push(PlayerAddr::Idle(user.borrow().ip_addr));
         user.borrow_mut().game_room_id = game_id;
         user.borrow_mut().in_room = true;
 
@@ -499,7 +532,7 @@ impl ServiceServer {
                 &(join_room.borrow().players.len() as u32 - 1),
             )?);
             for i in &join_room.borrow().players {
-                if let Some(addr) = *i {
+                if let PlayerAddr::Idle(addr) | PlayerAddr::Playing(addr) = *i {
                     let room_user = self.session_manager.get_user(addr)?;
                     let room_user = room_user.borrow();
                     data.append(&mut room_user.name.clone());
@@ -541,26 +574,28 @@ impl ServiceServer {
         // 싱크 갈림 현상을 대처하기 위해서 게임 중에는 플레이어 수를 변경하지 않으려 함.
 
         let user_room = self.session_manager.get_room(user.borrow().game_room_id)?;
-        if user_room.borrow().game_status != GameStatusWaiting {
+        if user_room.borrow().game_status != GAME_STATUS_WAITING {
             let index = user.borrow().player_index as usize;
             {
                 // version2
                 let players = &mut user_room.borrow_mut().players;
-                players.get_mut(index).map(|player| *player = None);
+                players
+                    .get_mut(index)
+                    .map(|player| *player = PlayerAddr::None);
             }
         } else {
             user_room.borrow_mut().players.retain(|&x| {
                 let delete = {
                     match x {
-                        Some(i) => i == user.borrow().ip_addr,
-                        None => false,
+                        PlayerAddr::Idle(i) | PlayerAddr::Playing(i) => i == user.borrow().ip_addr,
+                        PlayerAddr::None => false,
                     }
                 };
                 !delete
             });
         }
         let mut close_game = false;
-        if user_room.borrow().player_count() == 0 {
+        if user_room.borrow().player_some_count() == 0 {
             self.session_manager
                 .delete_room(user.borrow().game_room_id)?;
             close_game = true;
@@ -620,7 +655,7 @@ impl ServiceServer {
         user: Rc<RefCell<User>>,
     ) -> anyhow::Result<()> {
         let user_room = self.session_manager.get_room(user.borrow().game_room_id)?;
-        user_room.borrow_mut().game_status = GameStatusNetSync;
+        user_room.borrow_mut().game_status = GAME_STATUS_NET_SYNC;
         // send UPDATE_GAME_STATUS to all
         let mut data = Vec::new();
         data.push(0u8);
@@ -643,8 +678,8 @@ impl ServiceServer {
         let mut delay_messages: Vec<Vec<u8>> = Vec::new();
         for i in &user_room.borrow().players {
             let u = match i {
-                Some(i) => self.session_manager.get_user(*i),
-                None => continue,
+                PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => self.session_manager.get_user(*i),
+                PlayerAddr::None => continue,
             }?;
             let mut u = u.borrow_mut();
             u.player_index = order;
@@ -779,8 +814,10 @@ impl ServiceServer {
         // user 입력 game_data 을 방에 모든 인원의 메모리에 넣어야 함.
         for pi in &user_room.borrow().players {
             let u = match pi {
-                Some(i) => self.session_manager.get_user(*i)?,
-                None => continue,
+                PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => {
+                    self.session_manager.get_user(*i)?
+                }
+                PlayerAddr::None => continue,
             };
             u.borrow_mut().players_input[target_user_index].append(&mut game_data.to_vec().clone());
         }
@@ -803,8 +840,10 @@ impl ServiceServer {
 
         for pi in &user_room.borrow().players {
             let u = match pi {
-                Some(i) => self.session_manager.get_user(*i)?,
-                None => continue,
+                PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => {
+                    self.session_manager.get_user(*i)?
+                }
+                PlayerAddr::None => continue,
             };
             u.borrow_mut().players_input[target_user_index].append(&mut input_data.clone());
         }
@@ -822,11 +861,12 @@ impl ServiceServer {
         for i in user_room.borrow().players.iter() {
             // select user to send data
             let u = match i {
-                Some(i) => self.session_manager.get_user(*i)?,
-                None => continue,
+                PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => {
+                    self.session_manager.get_user(*i)?
+                }
+                PlayerAddr::None => continue,
             };
-            let players_num = u.borrow().players_input.len();
-            let data_to_send_to_user = UserRoom::gen_input(u.clone(), players_num);
+            let data_to_send_to_user = UserRoom::gen_input(u.clone(), user_room.clone());
             if let Ok(data_to_send_to_user) = data_to_send_to_user {
                 if !data_to_send_to_user.is_empty() {
                     let t = u
@@ -895,8 +935,10 @@ impl ServiceServer {
         // send DROP_GAME to room's users
         for i in room.borrow().players.iter() {
             let u = match i {
-                Some(i) => self.session_manager.get_user(*i)?,
-                None => continue,
+                PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => {
+                    self.session_manager.get_user(*i)?
+                }
+                PlayerAddr::None => continue,
             };
             let mut data = Vec::new();
             data.append(&mut user.borrow().name.clone());
@@ -908,6 +950,15 @@ impl ServiceServer {
         }
 
         user.borrow_mut().player_status = Idle;
+
+        let players = &mut room.borrow_mut().players;
+        if let Some(PlayerAddr::Playing(u)) | Some(PlayerAddr::Idle(u)) =
+            players.get_mut(user.borrow().player_index as usize)
+        {
+            *players
+                .get_mut(user.borrow().player_index as usize)
+                .unwrap() = PlayerAddr::Idle(*u);
+        }
         Ok(())
     }
     pub async fn svc_kick_user(
@@ -923,8 +974,10 @@ impl ServiceServer {
             let mut target_user = None;
             for i in room.borrow().players.iter() {
                 let u = match i {
-                    Some(i) => self.session_manager.get_user(*i)?,
-                    None => continue,
+                    PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => {
+                        self.session_manager.get_user(*i)?
+                    }
+                    PlayerAddr::None => continue,
                 };
                 if u.borrow().user_id == target_user_id {
                     target_user = Some(u);
@@ -945,8 +998,10 @@ impl ServiceServer {
         // send QUIT_GAME data to room's users
         for i in room.borrow().players.iter() {
             let u = match i {
-                Some(i) => self.session_manager.get_user(*i)?,
-                None => continue,
+                PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => {
+                    self.session_manager.get_user(*i)?
+                }
+                PlayerAddr::None => continue,
             };
             u.borrow_mut()
                 .make_send_packet(&mut self.socket, Protocol::new(QUIT_GAME, data.clone()))
@@ -956,8 +1011,8 @@ impl ServiceServer {
         // remove ip_addr target_user.borrow().ip_addr in room's players
         room.borrow_mut().players.retain(|i| {
             let delete = match i {
-                Some(i) => *i == target_user.borrow().ip_addr,
-                None => false,
+                PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => *i == target_user.borrow().ip_addr,
+                PlayerAddr::None => false,
             };
             !delete
         });
@@ -986,7 +1041,9 @@ impl ServiceServer {
     ) -> anyhow::Result<()> {
         //
         let user_room = self.session_manager.get_room(user.borrow().game_room_id)?;
-        user_room.borrow_mut().game_status = GameStatusPlaying;
+        user_room.borrow_mut().game_status = GAME_STATUS_PLAYING;
+        user_room.borrow_mut().players[user.borrow().player_index as usize] =
+            PlayerAddr::Playing(user.borrow().ip_addr);
         let mut data = Vec::new();
         data.push(0u8);
         data.append(&mut bincode::serialize(&user_room.borrow().game_id)?);
@@ -1003,8 +1060,8 @@ impl ServiceServer {
         }
         for i in &user_room.borrow().players {
             let u = match i {
-                Some(i) => self.session_manager.get_user(*i),
-                None => continue,
+                PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => self.session_manager.get_user(*i),
+                PlayerAddr::None => continue,
             }?;
             let mut u = u.borrow_mut();
             u.make_send_packet(
