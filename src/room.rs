@@ -242,7 +242,7 @@ impl UserRoom {
         let atomic_length = user.borrow().atomic_input_size;
         let mut all_input = true;
         for i in 0..players_num {
-            debug!(
+            trace!(
                 "user name: {}, player num: {}, player exist: {}",
                 String::from_utf8_lossy(&user.borrow().name),
                 i,
