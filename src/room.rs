@@ -31,8 +31,7 @@ pub struct User {
     pub ack_count: u32,
     pub send_count: u16,
     pub cur_seq: u16,
-    pub game_room_id: u32,
-    pub in_room: bool,
+    pub game_room_id: Option<u32>,
     pub room_order: u8,
     pub out_packets: Vec<Protocol>,
     pub in_packets: ProtocolPackets,
@@ -58,8 +57,7 @@ impl User {
             ack_count: 0,
             send_count: 0,
             cur_seq: 0,
-            game_room_id: 0,
-            in_room: false,
+            game_room_id: Option::None,
             room_order: 0,
             ip_addr,
             out_packets: Vec::new(),
@@ -199,7 +197,7 @@ impl fmt::Display for UserRoom {
                 addr,
                 uu.user_id,
                 from_utf8_lossy(uu.name.clone().as_slice()),
-                uu.in_room,
+                uu.game_room_id.is_some(),
                 uu.room_order,
                 uu.player_index
             );
