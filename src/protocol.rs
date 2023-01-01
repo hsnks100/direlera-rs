@@ -180,6 +180,316 @@ impl ProtocolPackets {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UserJoinPacket2Client {
+    pub user_name: Vec<u8>,
+    pub user_id: u16,
+    pub ping: u32,
+    pub connection_type: u8,
+}
+
+impl UserJoinPacket2Client {
+    pub fn new(
+        user_name: Vec<u8>,
+        user_id: u16,
+        ping: u32,
+        connection_type: u8,
+    ) -> UserJoinPacket2Client {
+        UserJoinPacket2Client {
+            user_name,
+            user_id,
+            ping,
+            connection_type,
+        }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut self.user_name.clone());
+        v.push(0u8);
+        v.append(&mut bincode::serialize(&self.user_id)?);
+        v.append(&mut bincode::serialize(&self.ping)?);
+        v.append(&mut bincode::serialize(&self.connection_type)?);
+        Ok(v)
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UserQuitPacket2Client {
+    pub user_name: Vec<u8>,
+    pub user_id: u16,
+    pub message: Vec<u8>,
+}
+
+impl UserQuitPacket2Client {
+    pub fn new(user_name: Vec<u8>, user_id: u16, message: Vec<u8>) -> UserQuitPacket2Client {
+        UserQuitPacket2Client {
+            user_name,
+            user_id,
+            message,
+        }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut self.user_name.clone());
+        v.push(0u8);
+        v.append(&mut bincode::serialize(&self.user_id)?);
+        v.append(&mut self.message.clone());
+        v.push(0u8);
+        Ok(v)
+    }
+}
+
+pub struct AckPacket2Client {
+    pub n: u8,
+    pub p0: u32,
+    pub p1: u32,
+    pub p2: u32,
+    pub p3: u32,
+}
+
+impl AckPacket2Client {
+    pub fn new(n: u8, p0: u32, p1: u32, p2: u32, p3: u32) -> AckPacket2Client {
+        AckPacket2Client { n, p0, p1, p2, p3 }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut bincode::serialize(&self.n)?);
+        v.append(&mut bincode::serialize(&self.p0)?);
+        v.append(&mut bincode::serialize(&self.p1)?);
+        v.append(&mut bincode::serialize(&self.p2)?);
+        v.append(&mut bincode::serialize(&self.p3)?);
+        Ok(v)
+    }
+}
+
+pub struct GlobalChat2Client {
+    pub user_name: Vec<u8>,
+    pub message: Vec<u8>,
+}
+
+impl GlobalChat2Client {
+    pub fn new(user_name: Vec<u8>, message: Vec<u8>) -> GlobalChat2Client {
+        GlobalChat2Client { user_name, message }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut self.user_name.clone());
+        v.push(0u8);
+        v.append(&mut self.message.clone());
+        v.push(0u8);
+        Ok(v)
+    }
+}
+
+pub struct GameChat2Client {
+    pub user_name: Vec<u8>,
+    pub message: Vec<u8>,
+}
+
+impl GameChat2Client {
+    pub fn new(user_name: Vec<u8>, message: Vec<u8>) -> GameChat2Client {
+        GameChat2Client { user_name, message }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut self.user_name.clone());
+        v.push(0u8);
+        v.append(&mut self.message.clone());
+        v.push(0u8);
+        Ok(v)
+    }
+}
+
+pub struct CreateGame2Client {
+    pub user_name: Vec<u8>,
+    pub game_name: Vec<u8>,
+    pub emul_name: Vec<u8>,
+    pub game_id: u32,
+}
+
+impl CreateGame2Client {
+    pub fn new(
+        user_name: Vec<u8>,
+        game_name: Vec<u8>,
+        emul_name: Vec<u8>,
+        game_id: u32,
+    ) -> CreateGame2Client {
+        CreateGame2Client {
+            user_name,
+            game_name,
+            emul_name,
+            game_id,
+        }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut self.user_name.clone());
+        v.push(0u8);
+        v.append(&mut self.game_name.clone());
+        v.push(0u8);
+        v.append(&mut self.emul_name.clone());
+        v.push(0u8);
+        v.append(&mut bincode::serialize(&self.game_id)?);
+        Ok(v)
+    }
+}
+
+pub struct JoinGame2Client {
+    pub n: u8,
+    pub game_id: u32,
+    pub user_name: Vec<u8>,
+    pub ping: u32,
+    pub user_id: u16,
+    pub connection_type: u8,
+}
+
+impl JoinGame2Client {
+    pub fn new(
+        game_id: u32,
+        user_name: Vec<u8>,
+        ping: u32,
+        user_id: u16,
+        connection_type: u8,
+    ) -> JoinGame2Client {
+        JoinGame2Client {
+            n: 0,
+            game_id,
+            user_name,
+            ping,
+            user_id,
+            connection_type,
+        }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut bincode::serialize(&self.n)?);
+        v.append(&mut bincode::serialize(&self.game_id)?);
+        v.append(&mut self.user_name.clone());
+        v.push(0u8);
+        v.append(&mut bincode::serialize(&self.ping)?);
+        v.append(&mut bincode::serialize(&self.user_id)?);
+        v.append(&mut bincode::serialize(&self.connection_type)?);
+        Ok(v)
+    }
+}
+
+pub struct UpdateGameStatus2Client {
+    pub n: u8,
+    pub game_id: u32,
+    pub game_status: u8, // 0: Waiting, 1:Playing, 2:Netsync
+    pub num_of_players: u8,
+    pub max_players: u8,
+}
+
+impl UpdateGameStatus2Client {
+    pub fn new(
+        n: u8,
+        game_id: u32,
+        game_status: u8,
+        num_of_players: u8,
+        max_players: u8,
+    ) -> UpdateGameStatus2Client {
+        UpdateGameStatus2Client {
+            n,
+            game_id,
+            game_status,
+            num_of_players,
+            max_players,
+        }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut bincode::serialize(&self.n)?);
+        v.append(&mut bincode::serialize(&self.game_id)?);
+        v.append(&mut bincode::serialize(&self.game_status)?);
+        v.append(&mut bincode::serialize(&self.num_of_players)?);
+        v.append(&mut bincode::serialize(&self.max_players)?);
+        Ok(v)
+    }
+}
+
+pub struct GameData2Client {
+    pub unused: u8,
+    pub len: u16,
+    pub game_data: Vec<u8>,
+}
+
+impl GameData2Client {
+    pub fn new(len: u16, game_data: Vec<u8>) -> GameData2Client {
+        GameData2Client {
+            unused: 0,
+            len,
+            game_data,
+        }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut bincode::serialize(&self.unused)?);
+        v.append(&mut bincode::serialize(&self.len)?);
+        v.append(&mut self.game_data.clone());
+        Ok(v)
+    }
+}
+
+pub struct GameCache2Client {
+    pub unused: u8,
+    pub cache_position: u8,
+}
+
+impl GameCache2Client {
+    pub fn new(cache_position: u8) -> GameCache2Client {
+        GameCache2Client {
+            unused: 0,
+            cache_position,
+        }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut bincode::serialize(&self.unused)?);
+        v.append(&mut bincode::serialize(&self.cache_position)?);
+        Ok(v)
+    }
+}
+
+pub struct GameDrop2Client {
+    pub user_name: Vec<u8>,
+    pub player_number: u8,
+}
+
+impl GameDrop2Client {
+    pub fn new(user_name: Vec<u8>, player_number: u8) -> GameDrop2Client {
+        GameDrop2Client {
+            user_name,
+            player_number,
+        }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut self.user_name.clone());
+        v.push(0u8);
+        v.append(&mut bincode::serialize(&self.player_number)?);
+        Ok(v)
+    }
+}
+
+pub struct ConnectionReject2Client {
+    pub user_name: Vec<u8>,
+    pub user_id: u16,
+}
+
+impl ConnectionReject2Client {
+    pub fn new(user_name: Vec<u8>, user_id: u16) -> ConnectionReject2Client {
+        ConnectionReject2Client { user_name, user_id }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut self.user_name.clone());
+        v.push(0u8);
+        v.append(&mut bincode::serialize(&self.user_id)?);
+        Ok(v)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::protocol::*;
