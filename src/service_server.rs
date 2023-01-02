@@ -365,38 +365,29 @@ impl ServiceServer {
     pub async fn svc_game_chat(&mut self, buf: Vec<u8>, ip_addr: SocketAddr) -> anyhow::Result<()> {
         // let user_room = &self.user_room;
         let user = self.session_manager.get_user(ip_addr)?;
-        if let Some(room_id) = user.borrow().game_room_id {
-            let room = self.session_manager.get_room(room_id)?;
-            let mut ips = Vec::new();
-            for i in &room.borrow().players {
-                ips.push(*i);
+        let room_id = match user.borrow().game_room_id {
+            Some(i) => i,
+            None => {
+                return Err(KailleraError::NotFound.into());
             }
+        };
+        let room = self.session_manager.get_room(room_id)?;
+        let mut ips = Vec::new();
+        for i in &room.borrow().players {
+            ips.push(*i);
+        }
 
-            for i in ips {
-                match i {
-                    PlayerAddr::None => {}
-                    PlayerAddr::Playing(s) => {
-                        let u = self.session_manager.get_user(s)?;
-                        let data = GameChat2Client::new(
-                            user.borrow().name.clone(),
-                            buf.clone()[1..].to_vec(),
-                        )
-                        .packetize()?;
-                        u.borrow_mut()
-                            .make_send_packet(&mut self.socket, Protocol::new(GAME_CHAT, data))
-                            .await?;
-                    }
-                    PlayerAddr::Idle(s) => {
-                        let u = self.session_manager.get_user(s)?;
-                        let data = GameChat2Client::new(
-                            user.borrow().name.clone(),
-                            buf.clone()[1..].to_vec(),
-                        )
-                        .packetize()?;
-                        u.borrow_mut()
-                            .make_send_packet(&mut self.socket, Protocol::new(GAME_CHAT, data))
-                            .await?;
-                    }
+        for i in ips {
+            match i {
+                PlayerAddr::None => {}
+                PlayerAddr::Playing(s) | PlayerAddr::Idle(s) => {
+                    let u = self.session_manager.get_user(s)?;
+                    let data =
+                        GameChat2Client::new(user.borrow().name.clone(), buf.clone()[1..].to_vec())
+                            .packetize()?;
+                    u.borrow_mut()
+                        .make_send_packet(&mut self.socket, Protocol::new(GAME_CHAT, data))
+                        .await?;
                 }
             }
         }
