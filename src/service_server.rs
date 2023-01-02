@@ -185,7 +185,7 @@ impl ServiceServer {
             );
             user.borrow_mut().keepalive_time = Instant::now();
         } else if message.header.header.message_type == CREATE_GAME {
-            self.svc_create_game(message.data.clone(), peer).await?;
+            self.svc_create_game(message.data.clone(), user).await?;
         } else if message.header.header.message_type == QUIT_GAME {
             info!("ON QUIT_GAME");
             self.svc_quit_game(message.data.clone(), user).await?;
@@ -396,10 +396,21 @@ impl ServiceServer {
     pub async fn svc_create_game(
         &mut self,
         buf: Vec<u8>,
-        ip_addr: SocketAddr,
+        user: Rc<RefCell<User>>,
     ) -> anyhow::Result<()> {
-        let user_room = &mut self.session_manager;
-        let user = user_room.get_user(ip_addr)?;
+        let has_room = user.borrow().game_room_id.is_some();
+        if has_room {
+            user.borrow_mut()
+                .send_message(
+                    &mut self.socket,
+                    b"You are already joining the room.".to_vec(),
+                )
+                .await?;
+            return Err(KailleraError::AlreadyError {
+                message: "already has room.".to_string(),
+            }
+            .into());
+        }
         let iter = buf.split(|num| num == &0).collect::<Vec<_>>();
         // let game_name = String::from_utf8(iter.get(1).ok_or(KailleraError::NotFound)?.to_vec())?;
         // create game packet
@@ -451,24 +462,24 @@ impl ServiceServer {
         }
         // join game
         {
-            for (_, u) in &self.session_manager.users {
-                let data = JoinGame2Client::new(
-                    new_room.game_id,
-                    user.borrow().name.clone(),
-                    user.borrow().ping,
-                    user.borrow().user_id,
-                    user.borrow().connect_type,
-                )
-                .packetize()?;
-                info!(
-                    "S->C: JOIN_GAME id: {}, user_id: {} ",
-                    new_room.game_id,
-                    user.borrow().user_id
-                );
-                u.borrow_mut()
-                    .make_send_packet(&mut self.socket, Protocol::new(JOIN_GAME, data))
-                    .await?;
-            }
+            // send data to room's players
+            let data = JoinGame2Client::new(
+                new_room.game_id,
+                user.borrow().name.clone(),
+                user.borrow().ping,
+                user.borrow().user_id,
+                user.borrow().connect_type,
+            )
+            .packetize()?;
+            info!(
+                "S->C: JOIN_GAME id: {}, user_id: {} ",
+                new_room.game_id,
+                user.borrow().user_id
+            );
+            user.borrow_mut()
+                .make_send_packet(&mut self.socket, Protocol::new(JOIN_GAME, data))
+                .await?;
+            // for (_, u) in &self.session_manager.users {
         }
         // server info
         {
@@ -492,6 +503,19 @@ impl ServiceServer {
         user: Rc<RefCell<User>>,
     ) -> anyhow::Result<()> {
         info!("on svc_join_game");
+        let has_room = user.borrow().game_room_id.is_some();
+        if has_room {
+            user.borrow_mut()
+                .send_message(
+                    &mut self.socket,
+                    b"You are already joining the room.".to_vec(),
+                )
+                .await?;
+            return Err(KailleraError::AlreadyError {
+                message: "already has room.".to_string(),
+            }
+            .into());
+        }
         let game_id = bincode::deserialize::<u32>(&buf[1..5])?;
         let _conn_type = buf.get(12).ok_or(KailleraError::NotFound);
         let join_room = self.session_manager.get_room(game_id)?;
@@ -557,10 +581,15 @@ impl ServiceServer {
                 user.borrow().connect_type,
             )
             .packetize()?;
-            for (_addr, u) in &self.session_manager.users {
-                u.borrow_mut()
-                    .make_send_packet(&mut self.socket, Protocol::new(JOIN_GAME, data.clone()))
-                    .await?;
+            // send data to room's player
+            for i in &join_room.borrow().players {
+                if let PlayerAddr::Idle(addr) | PlayerAddr::Playing(addr) = *i {
+                    let room_user = self.session_manager.get_user(addr)?;
+                    room_user
+                        .borrow_mut()
+                        .make_send_packet(&mut self.socket, Protocol::new(JOIN_GAME, data.clone()))
+                        .await?;
+                }
             }
         }
 
@@ -603,7 +632,7 @@ impl ServiceServer {
         }
         let mut close_game = false;
         if user_room.borrow().player_some_count() == 0 {
-            self.session_manager.delete_room(room_id);
+            self.session_manager.delete_room(room_id)?;
             close_game = true;
         }
         if close_game {
@@ -638,10 +667,13 @@ impl ServiceServer {
         }
         let data =
             QuitGame2Client::new(user.borrow().name.clone(), user.borrow().user_id).packetize()?;
-        for (_addr, u) in &self.session_manager.users {
-            u.borrow_mut()
-                .make_send_packet(&mut self.socket, Protocol::new(QUIT_GAME, data.clone()))
-                .await?;
+        for i in &user_room.borrow().players {
+            if let PlayerAddr::Idle(addr) | PlayerAddr::Playing(addr) = *i {
+                let u = self.session_manager.get_user(addr)?;
+                u.borrow_mut()
+                    .make_send_packet(&mut self.socket, Protocol::new(QUIT_GAME, data.clone()))
+                    .await?;
+            }
         }
         user.borrow_mut().game_room_id = None;
         Ok(())

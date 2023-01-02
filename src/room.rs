@@ -104,6 +104,16 @@ impl User {
         self.send_count = self.send_count.wrapping_add(1);
         Ok(())
     }
+    pub async fn send_message(
+        &mut self,
+        server_socket: &mut UdpSocket,
+        message: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        let data = GlobalChat2Client::new(b"Server".to_vec(), message).packetize()?;
+        let p = Protocol::new(GLOBAL_CHAT, data);
+        self.make_send_packet(server_socket, p).await?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -169,8 +179,8 @@ pub enum KailleraError {
     InvalidInput { message: String, pos: usize },
     #[error("token error")]
     TokenError,
-    #[error("{}, pos: {}", .message, .pos)]
-    AlreadyError { message: String, pos: usize },
+    #[error("{}", .message)]
+    AlreadyError { message: String },
     #[error("gamestatus error")]
     GameStatusError { message: String },
     #[error("notfound seq")]
@@ -301,7 +311,6 @@ impl UserRoom {
             Some(_s) => {
                 return Err(KailleraError::AlreadyError {
                     message: "room is already exist".to_string(),
-                    pos: 0,
                 });
             }
             None => {
