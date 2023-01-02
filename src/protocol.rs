@@ -334,6 +334,24 @@ impl CreateGame2Client {
     }
 }
 
+pub struct QuitGame2Client {
+    pub user_name: Vec<u8>,
+    pub game_id: u16,
+}
+
+impl QuitGame2Client {
+    pub fn new(user_name: Vec<u8>, game_id: u16) -> QuitGame2Client {
+        QuitGame2Client { user_name, game_id }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut self.user_name.clone());
+        v.push(0u8);
+        v.append(&mut bincode::serialize(&self.game_id)?);
+        Ok(v)
+    }
+}
+
 pub struct JoinGame2Client {
     pub n: u8,
     pub game_id: u32,
@@ -383,14 +401,13 @@ pub struct UpdateGameStatus2Client {
 
 impl UpdateGameStatus2Client {
     pub fn new(
-        n: u8,
         game_id: u32,
         game_status: u8,
         num_of_players: u8,
         max_players: u8,
     ) -> UpdateGameStatus2Client {
         UpdateGameStatus2Client {
-            n,
+            n: 0,
             game_id,
             game_status,
             num_of_players,
@@ -404,6 +421,32 @@ impl UpdateGameStatus2Client {
         v.append(&mut bincode::serialize(&self.game_status)?);
         v.append(&mut bincode::serialize(&self.num_of_players)?);
         v.append(&mut bincode::serialize(&self.max_players)?);
+        Ok(v)
+    }
+}
+
+pub struct StartGame2Client {
+    pub unused: u8,
+    pub frame_delay: u16,
+    pub player_num: u8,
+    pub total_num: u8,
+}
+
+impl StartGame2Client {
+    pub fn new(frame_delay: u16, player_num: u8, total_num: u8) -> StartGame2Client {
+        StartGame2Client {
+            unused: 0,
+            frame_delay,
+            player_num,
+            total_num,
+        }
+    }
+    pub fn packetize(&self) -> anyhow::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        v.append(&mut bincode::serialize(&self.unused)?);
+        v.append(&mut bincode::serialize(&self.frame_delay)?);
+        v.append(&mut bincode::serialize(&self.player_num)?);
+        v.append(&mut bincode::serialize(&self.total_num)?);
         Ok(v)
     }
 }

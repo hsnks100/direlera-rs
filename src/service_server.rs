@@ -73,11 +73,12 @@ impl ServiceServer {
             let user = self.session_manager.get_user(*i)?;
             let _ = self.fun_quit_game(user.clone()).await;
             // send quit message to all
-            let mut data = Vec::new();
-            data.append(&mut user.borrow().name.clone());
-            data.push(0u8);
-            data.append(&mut bincode::serialize(&user.borrow().user_id)?);
-            data.append(&mut b"time out\x00".to_vec());
+            let data = UserQuitPacket2Client::new(
+                user.borrow().name.clone(),
+                user.borrow().user_id,
+                b"time out".to_vec(),
+            )
+            .packetize()?;
             for (_addr, u) in &self.session_manager.users {
                 u.borrow_mut()
                     .make_send_packet(&mut self.socket, Protocol::new(USER_QUIT, data.clone()))
@@ -218,11 +219,12 @@ impl ServiceServer {
 
         let client_message = &buf[3..];
         // send quit message to all
-        let mut data = Vec::new();
-        data.append(&mut user.borrow().name.clone());
-        data.push(0u8);
-        data.append(&mut bincode::serialize(&user.borrow().user_id)?);
-        data.append(&mut client_message.to_vec());
+        let data = UserQuitPacket2Client::new(
+            user.borrow().name.clone(),
+            user.borrow().user_id,
+            client_message.to_vec(),
+        )
+        .packetize()?;
         for (_addr, u) in &self.session_manager.users {
             u.borrow_mut()
                 .make_send_packet(&mut self.socket, Protocol::new(USER_QUIT, data.clone()))
@@ -284,13 +286,13 @@ impl ServiceServer {
                     .await?;
             }
             for i in &self.session_manager.users {
-                let mut data = Vec::new();
-                let mut name = user.borrow().name.clone();
-                data.append(&mut name);
-                data.push(0u8);
-                data.append(&mut bincode::serialize::<u16>(&user.borrow().user_id)?);
-                data.append(&mut bincode::serialize::<u32>(&user.borrow().ping)?);
-                data.push(user.borrow().connect_type);
+                let data = UserJoinPacket2Client::new(
+                    user.borrow().name.clone(),
+                    user.borrow().user_id,
+                    user.borrow().ping,
+                    user.borrow().connect_type,
+                )
+                .packetize()?;
                 i.1.borrow_mut()
                     .make_send_packet(&mut self.socket, Protocol::new(USER_JOIN, data))
                     .await?;
@@ -298,7 +300,6 @@ impl ServiceServer {
             {
                 let mut data = Vec::new();
                 data.append(&mut b"Server\x00".to_vec());
-
                 let mut euc_kr = encoding_rs::EUC_KR
                     .encode(&self.config.get("notice").unwrap_or(&"".to_string()).clone())
                     .0
@@ -324,11 +325,8 @@ impl ServiceServer {
         let user_room = &mut self.session_manager;
         let user = user_room.get_user(ip_addr)?;
         let message = buf[1..].to_vec();
-        let mut data = Vec::new();
-        data.append(&mut user.borrow().name.clone());
-        data.push(0u8);
-        data.append(&mut message.clone());
-        // data.append(&mut "TEST string\x00".to_string().into_bytes());
+        let data =
+            GlobalChat2Client::new(user.borrow().name.clone(), message.clone()).packetize()?;
         for i in &self.session_manager.users {
             i.1.borrow_mut()
                 .make_send_packet(&mut self.socket, Protocol::new(GLOBAL_CHAT, data.clone()))
@@ -349,16 +347,13 @@ impl ServiceServer {
                 let split_data: Vec<_> = d.split('\n').collect();
                 for each_data in split_data {
                     if !each_data.is_empty() {
-                        let mut data = Vec::new();
-                        data.append(&mut user.borrow().name.clone());
-                        data.push(0u8);
-                        data.append(&mut each_data.to_string().into_bytes());
-                        data.push(0u8);
+                        let data = GlobalChat2Client::new(
+                            user.borrow().name.clone(),
+                            each_data.to_string().into_bytes(),
+                        )
+                        .packetize()?;
                         i.1.borrow_mut()
-                            .make_send_packet(
-                                &mut self.socket,
-                                Protocol::new(GLOBAL_CHAT, data.clone()),
-                            )
+                            .make_send_packet(&mut self.socket, Protocol::new(GLOBAL_CHAT, data))
                             .await?;
                     }
                 }
@@ -382,20 +377,22 @@ impl ServiceServer {
                     PlayerAddr::None => {}
                     PlayerAddr::Playing(s) => {
                         let u = self.session_manager.get_user(s)?;
-                        let mut data = Vec::new();
-                        data.append(&mut user.borrow().name.clone());
-                        data.push(0u8);
-                        data.append(&mut buf.clone()[1..].to_vec());
+                        let data = GameChat2Client::new(
+                            user.borrow().name.clone(),
+                            buf.clone()[1..].to_vec(),
+                        )
+                        .packetize()?;
                         u.borrow_mut()
                             .make_send_packet(&mut self.socket, Protocol::new(GAME_CHAT, data))
                             .await?;
                     }
                     PlayerAddr::Idle(s) => {
                         let u = self.session_manager.get_user(s)?;
-                        let mut data = Vec::new();
-                        data.append(&mut user.borrow().name.clone());
-                        data.push(0u8);
-                        data.append(&mut buf.clone()[1..].to_vec());
+                        let data = GameChat2Client::new(
+                            user.borrow().name.clone(),
+                            buf.clone()[1..].to_vec(),
+                        )
+                        .packetize()?;
                         u.borrow_mut()
                             .make_send_packet(&mut self.socket, Protocol::new(GAME_CHAT, data))
                             .await?;
@@ -417,14 +414,13 @@ impl ServiceServer {
         // create game packet
         {
             let game_name = iter.get(1).ok_or(KailleraError::NotFound)?.to_vec();
-            let mut data = Vec::new();
-            data.append(&mut user.borrow().name.clone());
-            data.push(0u8);
-            data.append(&mut game_name.clone());
-            data.push(0u8);
-            data.append(&mut user.borrow().emul_name.clone().as_bytes().to_vec());
-            data.push(0u8);
-            data.append(&mut bincode::serialize::<u32>(&self.game_id)?);
+            let data = CreateGame2Client::new(
+                user.borrow().name.clone(),
+                game_name.clone(),
+                user.borrow().emul_name.clone().into(),
+                self.game_id,
+            )
+            .packetize()?;
             info!("S->C: CREATE_GAME id: {}", self.game_id);
             for (_, user) in &self.session_manager.users {
                 user.borrow_mut()
@@ -446,29 +442,33 @@ impl ServiceServer {
             .push(PlayerAddr::Idle(user.borrow().ip_addr));
         // update game status
         {
+            let data = UpdateGameStatus2Client::new(
+                new_room.game_id,
+                new_room.game_status,
+                new_room.player_some_count() as u8,
+                4,
+            )
+            .packetize()?;
             for (_, user) in &self.session_manager.users {
-                let mut data = Vec::new();
-                data.push(0u8);
-                data.append(&mut bincode::serialize::<u32>(&new_room.game_id)?);
-                data.push(new_room.game_status);
-                data.push(new_room.player_some_count() as u8);
-                data.push(4u8);
                 user.borrow_mut()
-                    .make_send_packet(&mut self.socket, Protocol::new(UPDATE_GAME_STATUS, data))
+                    .make_send_packet(
+                        &mut self.socket,
+                        Protocol::new(UPDATE_GAME_STATUS, data.clone()),
+                    )
                     .await?;
             }
         }
         // join game
         {
             for (_, u) in &self.session_manager.users {
-                let mut data = Vec::new();
-                data.push(0u8);
-                data.append(&mut bincode::serialize::<u32>(&new_room.game_id)?);
-                data.append(&mut user.borrow().name.clone());
-                data.push(0u8);
-                data.append(&mut bincode::serialize::<u32>(&user.borrow().ping)?);
-                data.append(&mut bincode::serialize::<u16>(&user.borrow().user_id)?);
-                data.push(user.borrow().connect_type);
+                let data = JoinGame2Client::new(
+                    new_room.game_id,
+                    user.borrow().name.clone(),
+                    user.borrow().ping,
+                    user.borrow().user_id,
+                    user.borrow().connect_type,
+                )
+                .packetize()?;
                 info!(
                     "S->C: JOIN_GAME id: {}, user_id: {} ",
                     new_room.game_id,
@@ -519,15 +519,19 @@ impl ServiceServer {
         user.borrow_mut().game_room_id = Some(game_id);
 
         // send join message to all users.
+        let data = UpdateGameStatus2Client::new(
+            game_id,
+            join_room.borrow().game_status,
+            join_room.borrow().player_some_count() as u8,
+            4,
+        )
+        .packetize()?;
         for (_addr, user) in &self.session_manager.users {
-            let mut data = Vec::new();
-            data.push(0u8);
-            data.append(&mut bincode::serialize::<u32>(&game_id)?);
-            data.push(join_room.borrow().game_status);
-            data.push(join_room.borrow().players.len() as u8);
-            data.push(4_u8);
             user.borrow_mut()
-                .make_send_packet(&mut self.socket, Protocol::new(UPDATE_GAME_STATUS, data))
+                .make_send_packet(
+                    &mut self.socket,
+                    Protocol::new(UPDATE_GAME_STATUS, data.clone()),
+                )
                 .await?;
         }
         // response game join message
@@ -554,14 +558,14 @@ impl ServiceServer {
         }
         // send joingame to all users
         {
-            let mut data = Vec::new();
-            data.push(0u8);
-            data.append(&mut bincode::serialize::<u32>(&game_id)?);
-            data.append(&mut user.borrow().name.clone());
-            data.push(0u8);
-            data.append(&mut bincode::serialize::<u32>(&user.borrow().ping)?);
-            data.append(&mut bincode::serialize::<u16>(&user.borrow().user_id)?);
-            data.push(user.borrow().connect_type);
+            let data = JoinGame2Client::new(
+                game_id,
+                user.borrow().name.clone(),
+                user.borrow().ping,
+                user.borrow().user_id,
+                user.borrow().connect_type,
+            )
+            .packetize()?;
             for (_addr, u) in &self.session_manager.users {
                 u.borrow_mut()
                     .make_send_packet(&mut self.socket, Protocol::new(JOIN_GAME, data.clone()))
@@ -625,12 +629,13 @@ impl ServiceServer {
         } else {
             info!("keep game room");
             // send game status noti to all
-            let mut data = Vec::new();
-            data.push(0u8);
-            data.append(&mut bincode::serialize(&user_room.borrow().game_id)?);
-            data.push(user_room.borrow().game_status);
-            data.push(user_room.borrow().players.len() as u8);
-            data.push(4u8);
+            let data = UpdateGameStatus2Client::new(
+                user_room.borrow().game_id,
+                user_room.borrow().game_status,
+                user_room.borrow().players.len() as u8,
+                4,
+            )
+            .packetize()?;
             for (_addr, u) in &self.session_manager.users {
                 u.borrow_mut()
                     .make_send_packet(
@@ -640,10 +645,8 @@ impl ServiceServer {
                     .await?;
             }
         }
-        let mut data = Vec::new();
-        data.append(&mut user.borrow().name.clone());
-        data.push(0u8);
-        data.append(&mut bincode::serialize(&user.borrow().user_id)?);
+        let data =
+            QuitGame2Client::new(user.borrow().name.clone(), user.borrow().user_id).packetize()?;
         for (_addr, u) in &self.session_manager.users {
             u.borrow_mut()
                 .make_send_packet(&mut self.socket, Protocol::new(QUIT_GAME, data.clone()))
@@ -674,12 +677,13 @@ impl ServiceServer {
         let user_room = self.session_manager.get_room(room_id)?;
         user_room.borrow_mut().game_status = GAME_STATUS_NET_SYNC;
         // send UPDATE_GAME_STATUS to all
-        let mut data = Vec::new();
-        data.push(0u8);
-        data.append(&mut bincode::serialize(&user.borrow().game_room_id)?);
-        data.push(user_room.borrow().game_status);
-        data.push(user_room.borrow().players.len() as u8);
-        data.push(4u8);
+        let data = UpdateGameStatus2Client::new(
+            user_room.borrow().game_id,
+            user_room.borrow().game_status,
+            user_room.borrow().players.len() as u8,
+            4,
+        )
+        .packetize()?;
         for (_addr, u) in &self.session_manager.users {
             u.borrow_mut()
                 .make_send_packet(
@@ -703,7 +707,6 @@ impl ServiceServer {
             u.room_order = order;
             u.player_status = Playing;
 
-            let mut data = Vec::new();
             let frame_delay = Self::cal_frame_delay(u.connect_type, u.ping);
             info!("frame_delay: {}", frame_delay);
             let mut notice_message = u.name.clone();
@@ -711,10 +714,12 @@ impl ServiceServer {
             notice_message.append(&mut frame_delay.to_string().into_bytes());
             notice_message.push(0u8);
             delay_messages.push(notice_message.clone());
-            data.push(0u8);
-            data.append(&mut bincode::serialize(&frame_delay)?);
-            data.push(order + 1);
-            data.push(user_room.borrow().players.len() as u8);
+            let data = StartGame2Client::new(
+                frame_delay,
+                order + 1,
+                user_room.borrow().players.len() as u8,
+            )
+            .packetize()?;
             u.reset_outcoming();
             u.players_input
                 .resize(user_room.borrow().players.len(), Vec::new());
@@ -910,14 +915,10 @@ impl ServiceServer {
                         .get_cache_position(data_to_send_to_user.clone());
                     match t {
                         Ok(cache_position) => {
-                            let mut data = Vec::new();
-                            data.push(0u8);
-                            data.push(cache_position);
-                            let t0 = Instant::now();
+                            let data = GameCache2Client::new(cache_position).packetize()?;
                             u.borrow_mut()
                                 .make_send_packet(&mut self.socket, Protocol::new(GAME_CACHE, data))
                                 .await?;
-                            trace!("cache send time : {:?}", t0.elapsed());
                         }
                         Err(_e) => {
                             u.borrow_mut()
@@ -927,17 +928,14 @@ impl ServiceServer {
                                 "cache len : {}",
                                 u.borrow().put_cache.incoming_data_vec.len()
                             );
-                            let mut data = Vec::new();
-                            data.push(0u8);
-                            data.append(&mut bincode::serialize(
-                                &(data_to_send_to_user.len() as u16),
-                            )?);
-                            data.append(&mut data_to_send_to_user.clone());
-                            let t0 = Instant::now();
+                            let data = GameData2Client::new(
+                                data_to_send_to_user.len() as u16,
+                                data_to_send_to_user,
+                            )
+                            .packetize()?;
                             u.borrow_mut()
                                 .make_send_packet(&mut self.socket, Protocol::new(GAME_DATA, data))
                                 .await?;
-                            trace!("data send time : {:?}", t0.elapsed());
                         }
                     }
                 }
@@ -958,12 +956,13 @@ impl ServiceServer {
         };
         let room = self.session_manager.get_room(room_id)?;
         // send UPDATE_GAME_STATUS to session_manager.users all
-        let mut data = Vec::new();
-        data.push(0u8);
-        data.append(&mut bincode::serialize(&user.borrow().game_room_id)?);
-        data.push(room.borrow().game_status);
-        data.push(room.borrow().players.len() as u8);
-        data.push(4);
+        let data = UpdateGameStatus2Client::new(
+            room_id,
+            room.borrow().game_status,
+            room.borrow().players.len() as u8,
+            4,
+        )
+        .packetize()?;
         for (_addr, u) in &self.session_manager.users {
             u.borrow_mut()
                 .make_send_packet(
@@ -974,6 +973,8 @@ impl ServiceServer {
         }
 
         // send DROP_GAME to room's users
+        let data = GameDrop2Client::new(user.borrow().name.clone(), user.borrow().player_index + 1)
+            .packetize()?;
         for i in room.borrow().players.iter() {
             let u = match i {
                 PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => {
@@ -981,12 +982,8 @@ impl ServiceServer {
                 }
                 PlayerAddr::None => continue,
             };
-            let mut data = Vec::new();
-            data.append(&mut user.borrow().name.clone());
-            data.push(0u8);
-            data.push(user.borrow().player_index + 1);
             u.borrow_mut()
-                .make_send_packet(&mut self.socket, Protocol::new(DROP_GAME, data))
+                .make_send_packet(&mut self.socket, Protocol::new(DROP_GAME, data.clone()))
                 .await?;
         }
 
@@ -1038,10 +1035,8 @@ impl ServiceServer {
         };
 
         target_user.borrow_mut().game_room_id = None;
-        let mut data = Vec::new();
-        data.append(&mut target_user.borrow().name.clone());
-        data.push(0u8);
-        data.append(&mut bincode::serialize(&target_user_id)?);
+        let data =
+            QuitGame2Client::new(target_user.borrow().name.clone(), target_user_id).packetize()?;
         // send QUIT_GAME data to room's users
         for i in room.borrow().players.iter() {
             let u = match i {
@@ -1065,12 +1060,13 @@ impl ServiceServer {
         });
 
         // send UPDATE_GAME_STATUS to session_manager.users all
-        let mut data = Vec::new();
-        data.push(0u8);
-        data.append(&mut bincode::serialize(&user.borrow().game_room_id)?);
-        data.push(room.borrow().game_status);
-        data.push(room.borrow().players.len() as u8);
-        data.push(4);
+        let data = UpdateGameStatus2Client::new(
+            room_id,
+            room.borrow().game_status,
+            room.borrow().players.len() as u8,
+            4,
+        )
+        .packetize()?;
         for (_addr, u) in &self.session_manager.users {
             u.borrow_mut()
                 .make_send_packet(
@@ -1096,12 +1092,13 @@ impl ServiceServer {
         user_room.borrow_mut().game_status = GAME_STATUS_PLAYING;
         user_room.borrow_mut().players[user.borrow().player_index as usize] =
             PlayerAddr::Playing(user.borrow().ip_addr);
-        let mut data = Vec::new();
-        data.push(0u8);
-        data.append(&mut bincode::serialize(&user_room.borrow().game_id)?);
-        data.push(user_room.borrow().game_status);
-        data.push(user_room.borrow().players.len() as u8);
-        data.push(4);
+        let data = UpdateGameStatus2Client::new(
+            room_id,
+            user_room.borrow().game_status,
+            user_room.borrow().players.len() as u8,
+            4,
+        )
+        .packetize()?;
         for (_addr, u) in &self.session_manager.users {
             u.borrow_mut()
                 .make_send_packet(
@@ -1124,13 +1121,4 @@ impl ServiceServer {
         }
         Ok(())
     }
-}
-
-// cp949 to utf-8 for vec<u8>
-fn cp949_to_utf8(data: Vec<u8>) -> String {
-    let mut s = String::new();
-    for i in data {
-        s.push(i as char);
-    }
-    s
 }
