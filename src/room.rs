@@ -146,6 +146,7 @@ pub struct Room {
     // quitting user in game is None
     pub players: Vec<PlayerAddr>,
     pub game_status: GameStatus,
+    pub same_delay: bool,
 }
 
 impl Room {
@@ -157,6 +158,7 @@ impl Room {
             creator_id: "".to_string(),
             players: Vec::new(),
             game_status: 0,
+            same_delay: false,
         }
     }
     pub fn player_some_count(&self) -> usize {
@@ -306,7 +308,7 @@ impl UserRoom {
         let user = self.users.get(&ip_addr).ok_or(KailleraError::NotFound)?;
         Ok(user.clone())
     }
-    pub fn add_room(&mut self, ch: u32, r: Room) -> Result<(), KailleraError> {
+    pub fn add_room(&mut self, ch: u32, r: Rc<RefCell<Room>>) -> Result<(), KailleraError> {
         match self.rooms.get(&ch) {
             Some(_s) => {
                 return Err(KailleraError::AlreadyError {
@@ -314,7 +316,7 @@ impl UserRoom {
                 });
             }
             None => {
-                self.rooms.insert(ch, Rc::new(RefCell::new(r)));
+                self.rooms.insert(ch, r);
             }
         }
         Ok(())

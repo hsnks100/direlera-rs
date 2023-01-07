@@ -1,6 +1,6 @@
 [package]
 name = "direlera-rs"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -19,5 +19,6 @@ env_logger = "0.10.0"
 chrono = "0.4.23"
 encoding_rs = "0.8.31"
 config = "0.13.3"
+
 
 

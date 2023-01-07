@@ -377,16 +377,25 @@ impl ServiceServer {
             ips.push(*i);
         }
 
+        let data = GameChat2Client::new(user.borrow().name.clone(), buf.clone()[1..].to_vec())
+            .packetize()?;
+        let chat_content = buf.clone()[1..].to_vec();
+        if chat_content == b"/samedelay true\x00" {
+            info!("delay true");
+            room.borrow_mut().same_delay = true;
+        } else if chat_content == b"/samedelay false\x00" {
+            info!("delay false");
+            room.borrow_mut().same_delay = false;
+        }
+        info!("game chat: {:?}", chat_content);
+        info!("cmp chat: {:?}", b"/samedelay true");
         for i in ips {
             match i {
                 PlayerAddr::None => {}
                 PlayerAddr::Playing(s) | PlayerAddr::Idle(s) => {
                     let u = self.session_manager.get_user(s)?;
-                    let data =
-                        GameChat2Client::new(user.borrow().name.clone(), buf.clone()[1..].to_vec())
-                            .packetize()?;
                     u.borrow_mut()
-                        .make_send_packet(&mut self.socket, Protocol::new(GAME_CHAT, data))
+                        .make_send_packet(&mut self.socket, Protocol::new(GAME_CHAT, data.clone()))
                         .await?;
                 }
             }
@@ -461,10 +470,11 @@ impl ServiceServer {
             }
         }
         // join game
+        let new_room = Rc::new(RefCell::new(new_room));
         {
             // send data to room's players
             let data = JoinGame2Client::new(
-                new_room.game_id,
+                new_room.borrow().game_id,
                 user.borrow().name.clone(),
                 user.borrow().ping,
                 user.borrow().user_id,
@@ -473,11 +483,28 @@ impl ServiceServer {
             .packetize()?;
             info!(
                 "S->C: JOIN_GAME id: {}, user_id: {} ",
-                new_room.game_id,
+                new_room.borrow().game_id,
                 user.borrow().user_id
             );
             user.borrow_mut()
                 .make_send_packet(&mut self.socket, Protocol::new(JOIN_GAME, data))
+                .await?;
+
+            self.session_manager
+                .send_game_chat_to_players(
+                    &mut self.socket,
+                    new_room.clone(),
+                    "SERVER".to_string(),
+                    "direlera supports follow the options\x00".as_bytes().into(),
+                )
+                .await?;
+            self.session_manager
+                .send_game_chat_to_players(
+                    &mut self.socket,
+                    new_room.clone(),
+                    "SERVER".to_string(),
+                    "/samedealy true|false\x00".as_bytes().into(),
+                )
                 .await?;
             // for (_, u) in &self.session_manager.users {
         }
@@ -493,7 +520,8 @@ impl ServiceServer {
                 .make_send_packet(&mut self.socket, Protocol::new(SERVER_INFO, data))
                 .await?;
         }
-        self.session_manager.add_room(new_room.game_id, new_room)?;
+        let gi = new_room.borrow().game_id;
+        self.session_manager.add_room(gi, new_room)?;
 
         Ok(())
     }
@@ -718,6 +746,18 @@ impl ServiceServer {
         // send GAME_START to room players
         let mut order = 0u8;
 
+        let mut max_frame_delay = 0u16;
+        for i in &user_room.borrow().players {
+            let u = match i {
+                PlayerAddr::Playing(i) | PlayerAddr::Idle(i) => self.session_manager.get_user(*i),
+                PlayerAddr::None => continue,
+            }?;
+            let u = u.borrow();
+            let frame_delay = Self::cal_frame_delay(u.connect_type, u.ping);
+            if max_frame_delay < frame_delay {
+                max_frame_delay = frame_delay;
+            }
+        }
         // show frame delay to all
         let mut delay_messages: Vec<Vec<u8>> = Vec::new();
         for i in &user_room.borrow().players {
@@ -730,11 +770,26 @@ impl ServiceServer {
             u.room_order = order;
             u.player_status = Playing;
 
-            let frame_delay = Self::cal_frame_delay(u.connect_type, u.ping);
+            let real_frame_delay = Self::cal_frame_delay(u.connect_type, u.ping);
+            let frame_delay = if user_room.borrow().same_delay {
+                max_frame_delay
+            } else {
+                real_frame_delay
+            };
             info!("frame_delay: {}", frame_delay);
             let mut notice_message = u.name.clone();
-            notice_message.append(&mut ", frame delay(index): ".to_string().into_bytes());
-            notice_message.append(&mut frame_delay.to_string().into_bytes());
+            if user_room.borrow().same_delay {
+                notice_message.append(
+                    &mut format!(
+                        ", [samedelay mode] index {} -> {}",
+                        real_frame_delay, max_frame_delay
+                    )
+                    .into_bytes(),
+                );
+            } else {
+                notice_message.append(&mut ", frame delay(index): ".to_string().into_bytes());
+                notice_message.append(&mut real_frame_delay.to_string().into_bytes());
+            }
             notice_message.push(0u8);
             delay_messages.push(notice_message.clone());
             let data = StartGame2Client::new(
