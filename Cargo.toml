@@ -19,6 +19,7 @@ env_logger = "0.10.0"
 chrono = "0.4.23"
 encoding_rs = "0.8.31"
 config = "0.13.3"
+rand = "0.8.5"
 
 
 

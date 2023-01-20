@@ -4,6 +4,7 @@ use crate::room::*;
 #[cfg(feature = "alloc")]
 use encoding_rs::*;
 use log::{info, trace};
+use rand::Rng;
 use serde::__private::from_utf8_lossy;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -278,7 +279,16 @@ impl ServiceServer {
             let len = user.borrow().pings.len() as f64;
 
             let average = sum as f64 / len;
-            user.borrow_mut().ping = average as u32;
+            let is_random = match self.config.get("random_ping") {
+                Some(x) => x.parse::<bool>().unwrap(),
+                None => false,
+            };
+            if is_random {
+                // set random ping [0, 100]
+                user.borrow_mut().ping = rand::thread_rng().gen_range(0..100);
+            } else {
+                user.borrow_mut().ping = average as u32;
+            }
             {
                 let p = user_room.make_server_status(user.borrow().ip_addr)?;
                 user.borrow_mut()

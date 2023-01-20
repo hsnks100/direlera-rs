@@ -1,6 +1,7 @@
 main_port = 27888
 sub_port = 27999
 debug = false
+random_ping = false
 priority = 32
 key = "189rjfadoisfj8923fjio"
 notice = """
