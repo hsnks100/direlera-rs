@@ -1,0 +1,1319 @@
+o-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-o
+| The latest version of this document is found at |
+| https://remz.ca/emulinker/documentation.pdf |
+o-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-o
+1.1 → Introduction & Software
+1.2 → Emulators
+1.3 → List of commands
+1.4 → FAQs
+1.5 → Kaillera Network Protocol
+1.6 → Master Servers List (Backup)
+Websites:
+https://EmuLinker.org
+https://kaillerareborn.github.io
+___________________________________________________________________________________
+Kaillera is software called middleware. It brings you the possibility to play video
+games online through the use of emulators.
+It consists of a client and a server. The client is usually embedded into your
+favorite emulator and the server is a stand-alone application that needs to be run
+on a machine directly wired to the Internet.
+► Kaillera features:
+- Small, fast and efficient C++ code.
+- UDP use for better latency.
+- Intelligent networking cache code.
+- Multi-platform support.
+- Low to no lag for players with good ping.
+- Works through firewalls.
+- LANs/WANs support.
+•••••••••••••••••
+• OPEN KAILLERA •
+•••••••••••••••••
+Open Kaillera is an open-source client library, aimed to extend and improve
+maintaining backward-compatibility with the Kaillera netplay protocol.
+► Mode 1. P2P
+Host must select host tab and then the game they want to play. The player hosting
+must send the client their IP address. Client copies and enters the IP in the
+'Connect' tab then click 'Connect'. If the hosts ports are not blocked the client
+should be able to join the hosted game room. Both players must check the 'click
+here when ready' box for the game to start. Select 'Record game' before starting
+the game to have the game recorded for later viewing.
+► Mode 2. Client
+When a desync occurs mid-game in a server, click 'Drop' in the Kaillera client to
+disconnect and unfreeze game, so you can re-enter to the server without the need to
+end the program via Task Manager.
+► Mode 3. Playback
+Recorded games are saved as .krec files in a record folder which is automatically
+created in the same directory as your emulator. Press refresh for new files to show
+on the Playback list. The replay is shown through the emulator. It's not a video
+file, basically keystrokes are recorded during playthrough and imitated during
+playback automatically.
+↓ Downloads
+• Open Kaillera - n02 v0.5r1 (kaillera 0.9 compatible) - Mar 27 2021
+https://emulinker.org/downloads/
+•••••••••••••••
+• EMULINKERSF •
+•••••••••••••••
+EmuLinker is a high-performance, scalable, secure, open-source re-implementation of
+the Kaillera network protocol server.
+EmuLinkerSF is a modified version of the original EmuLinker server created by
+Moosehead with new features by SupraFast.
+► EmuLinker features (Implementation):
+- Written 100% in Java.
+- Designed following the MVC pattern for extensibility.
+- Modular design using PicoContainer.
+- Highly concurrent for performance using concurrency APIs in Java 1.5.
+► EmuLinker features (Server):
+- Stops all know hacks and exploits from the original Kaillera server by using
+strong buffer, boundary, and overflow checking.
+- Does not allow interruption of games in progress.
+- Game desynch detection and notification.
+- Intelligent desynch handling: if one player drops or lags, others can continue
+playing.
+- International language support.
+- Prevents emulator lockup when game starter drops quickly.
+- Multiple user access levels with a comprehensive set of escape commands for
+online server administration.
+- Aggressive spam control with chat message and game name validation.
+- Games remember users that were kicked to prevent annoying re-joining.
+- Duplicate user login protection with reconnection handling.
+- Game and emulator filters enable server owners to run a server intended for a
+specific game, and/or restrict playing of a specific game or games.
+- Maximum game setting to help limit bandwidth usage.
+- Uses a configurable limited range of network ports instead of any available port,
+making firewall setup easier than the original server.
+- Inactivity timeout prevents extended user idling.
+- Extensive logging of all server activity with automatic log file rotation.
+- Domain name support in access file allows for each configuration for people
+without a static IP address.
+- Unique Autofire Detector feature can alert players about possible cheating.
+↓ Downloads
+• EmuLinkerSF (Server)
+• EmuLinkerSF (Admin Client)
+https://emulinker.org/downloads/
+___________________________________________________________________________________
+ ________ _____ ____ ___ __________ ____ _____
+ / ____/ |/ / / / / / / |/_ __/ __ \/ __ \/ ___/
+ / __/ / /|_/ / / / / / / /| | / / / / / / /_/ /\__ \
+ / /___/ / / / /_/ / /___/ ___ |/ / / /_/ / _, _/___/ /
+/_____/_/ /_/\____/_____/_/ |_/_/ \____/_/ |_|/____/
+↓ https://remz.ca/emu
+• CCS64 ————————————> Commodore 64 (C64)
+• DEmul ————————————> Sega NAOMI, Sega NAOMI 2, Atomiswave
+• ePSXe ————————————> Sony PlayStation (PSX)
+• Gens —————————————> Sega Mega Drive (Genesis), 32X
+• MAME —————————————> Arcade, Neo·Geo
+• Mupen64++ ————————> Nintendo 64 (N64)
+• Nestopia —————————> Nintendo Entertainment System (NES)
+• Nostalgia ————————> Intellivision
+• Snes9K ———————————> Super Nintendo Entertainment System (SNES)
+• WinUAE ———————————> Commodore Amiga
+Other emulators with Kaillera (without tutorials yet):
+• Atari800Win PLus —> Atari 400, 800, 600 XL, 800XL, 130XE, 5200
+• Meisei ———————————> MSX
+Note: leave the configuration by default to avoid desyncs while playing online
+(unless specified otherwise in said tutorial).
+ _____ _____ _____ __ _ _
+ / ____/ ____|/ ____| / /| || |
+| | | | | (___ / /_| || |_
+| | | | \___ \| '_ \__ _|
+| |___| |____ ____) | (_) | | |
+ \_____\_____|_____/ \___/ |_|
+[Description]
+CCS64 is an accurate Commodore 64 emulator which can play Commodore 64 formatted
+cartridges, demos, games, and music in Windows.
+↓ Downloads
+• CCS64 v3.9.2
+https://remz.ca/kaillera/emu/CCS64_V3.9.2.zip
+[Tutorial]
+'-Options > Input...'
+Control Port 1: Joystick / Key-Set 1. Go to 'Define Joystick Keyset...' to
+configure the controls.
+Control Port 2: None
+The second player must have the settings in reverse order (Control Port 1: None.
+Control Port 2: Joystick / Key-Set 1).
+The controls will be mixed for both players if this isn't set up correctly.
+~ To start playing online: '-File > Load C64 Files > Tape...' Go to (Dir) Roms,
+highlight the game and then hit F3.
+↓ ROMs C64 [No-Intro]
+https://romcollector.asuscomm.com/
+» FAQ:
+http://www.ccs64.com/ccs64faq.html
+ _____ ______ __ __ _ _ _
+| __ \| ____| \/ | | | | |
+| | | | |__ | \ / | | | | |
+| | | | __| | |\/| | | | | |
+| |__| | |____| | | | |__| | |____
+|_____/|______|_| |_|\____/|______|
+[Description]
+DEmul is a Dreamcast emulator. At present, the emulator supports the emulation of
+the arcade machines based on the Sega Dreamcast such as NAOMI, NAOMI 2 and
+Atomiswave.
+↓ Downloads
+• BIOS Pack (DC)
+http://www.mediafire.com/download/y7b7l79zka4zeud/demul07a_bios.7z
+or
+https://mega.nz/#!aNlQ2TrR!OAUp3t4R5V_5neKhIRjc6BGkQcMd-D7coh_U9TgQYWk
+• DEmul v0.7
+https://remz.ca/kaillera/emu/demul07_180428.zip
+↓ Downloads (Older emulators/versions)
+• DEmul v0.5.7 (Latest version with DX9 support)
+https://remz.ca/kaillera/emu/DEmul_0.5.7.zip
+• DEmul v0.5.6 (Specific version to play Dreamcast games)
+https://remz.ca/kaillera/emu/DEmul_0.5.6_(FGO_Repack).zip
+[Tutorial] (v0.5.7)
+-'Config > Netplay' and check the 'Enable netplay' option.
+-'Config > Controls' to set up the controls ("Joy 1" in both systems).
+-'Config > Plugins and Paths' and select these options: Video Plugin: gpuDXv3* /
+GD-ROM Plugin: gdrImage.
+* If this option doesn't appear, you need to install the DirectX 9.0c
+> https://www.mediafire.com/folder/xma2w7owh52k7/
+~ To start playing online: Load the game, then the Kaillera client starts
+automatically.
+↓ ROMs (v0.5.7)
+https://mega.nz/#F!ud8l1QoK!-zc7TCPtaoy714TtHUYM8w
+↓ ROMs [Arcade]
+https://archive.org/download/demul07_2017/2_demul_roms_11-11-2017/
+↓ ROMs [Redump]
+https://1fichier.com/dir/v7aTubb7
+» FAQ:
+https://translate.google.com/translate?sl=ru&tl=en&u=http%3A%2F%2Fdemul.emulation64
+.com%2Ffaq%2F
+ ______ _____ _______ ________
+| ____| __ \ / ____\ \ / / ____|
+| |__ | |__) | (___ \ V /| |__
+| __| | ___/ \___ \ > < | __|
+| |____| | ____) |/ . \| |____
+|______|_| |_____//_/ \_\______|
+[Description]
+ePSXe (enhanced PSX emulator) is a PlayStation video game console emulator for 
+x86-based PC hardware with Microsoft Windows or Linux, as well as devices running
+Android.
+↓ Downloads
+• ePSXe v1.6.0
+http://remz.ca/ePSXe.v1.6.0.zip
+[Tutorial]
+-'Config > Wizard Guide'
+1/7: Config >>
+2/7: SCPH-1001
+3/7: Pete's DX6 D3D Driver 1.77*
+4/7: Eternal SPU Plugin Lite 1.41*
+5/7: ePSXe CDR WNT/W2K core 1.5.2.
+6/7: Controller 1
+7/7: Done
+* You need to configure the plugins as they are shown in these screenshots:
+Video —> https://i.imgur.com/fBFa2ME.png
+Sound —> https://i.imgur.com/dhYgWdf.png
+-'Config > Netplay'
+Select the 'CyberPad' plugin for 1–2 Player games.
+Select the 'PS4NET' plugin for 1–8 Player games.**
+** Select this plugin only in case that there are 3 players or more in the same
+game room.
+It's possible to save the progress of the games while playing online (necessary to
+finish long games such as RPGs).
+After saving the progress in the game, send to the other player the 2 files located
+in your 'memcards' folder.
+The other player has to put those files in its 'memcards' folder, go to -'Config >
+Memory Card' and select those files.
+1: epsxe000.mcr
+2: epsxe001.mcr
+After that, isn't necessary anymore to send to the other person the "newer"
+savestates every time you save the progress.
+~ To start playing online: Load the game, then the Kaillera client starts
+automatically.
+Press Esc (while playing online) to close properly your current game, then press
+'Drop' and close the Kaillera client.
+Lastly, check in the Task manager (Ctrl + Alt + Del) that the "ePSXe.exe" process
+is still not running in the background.
+↓ ROMs (Some games)
+https://mega.nz/#F!JJkVwQJC!VXhoDEPkN_RWym4cF7g75Q
+↓ ROMs [Redump]
+https://mega.nz/folder/nihEGDQY#UGM1X3cWYeoTdP5iXWVr1g
+[#] https://1fichier.com/dir/N2hNhPQS
+[A] https://1fichier.com/dir/Y9U2fom9
+[B] https://1fichier.com/dir/DSFvS0ZG
+[C] https://1fichier.com/dir/PQYU12gZ
+[D] https://1fichier.com/dir/GwDxfaDl
+[E] https://1fichier.com/dir/qLQlnpeF
+[F] https://1fichier.com/dir/jSzzijef
+[G] https://1fichier.com/dir/828t55FJ
+[H] https://1fichier.com/dir/xtLTIsCS
+[I] https://1fichier.com/dir/ksrubJPd
+[J] https://1fichier.com/dir/J3cFcTLf
+[K] https://1fichier.com/dir/N8QFrzWw
+[L] https://1fichier.com/dir/fDyQnub2
+[M] https://1fichier.com/dir/t7ZTclvD
+[N] https://1fichier.com/dir/yCHBWPH6
+[O] https://1fichier.com/dir/io1w9srX
+[P] https://1fichier.com/dir/eID7m3Sg
+[Q] https://1fichier.com/dir/ksLtDhhx
+[R] https://1fichier.com/dir/kIh6aKcc
+[S] https://1fichier.com/dir/gMASNNqZ
+[T] https://1fichier.com/dir/SKEn594h
+[U] https://1fichier.com/dir/rqppQ4oT
+[V] https://1fichier.com/dir/yJ31arCX
+[W] https://1fichier.com/dir/MzWjF6oS
+[X] https://1fichier.com/dir/cx5AcGKA
+[Y] https://1fichier.com/dir/T4fck0Jr
+[Z] https://1fichier.com/dir/bQCjEb7e
+ _____ ______ _ _ _____
+ / ____| ____| \ | |/ ____|
+| | __| |__ | \| | (___
+| | |_ | __| | . ` |\___ \
+| |__| | |____| |\ |____) |
+ \_____|______|_| \_|_____/
+[Description]
+Gens is a Sega Mega Drive/Genesis emulator. Gens also supports running Sega CD and
+Sega 32X games.
+↓ Downloads
+• Gens v2.10
+https://remz.ca/wgens210.zip
+• Gens v2.14
+https://remz.ca/Gens_2.14.zip
+[Tutorial]
+Since the v2.10 crashes when you try to set up the controls, you need to run the
+v2.14 in first instance (gens214.exe).
+-'Graphic > Render' and choose 'Double' or '2xSAI (Kreed)'
+-'Sound > Rate' and select '44100'
+-'Sound' and enable the option 'YM2612 High Quality'
+-'Option > Joypads... > PORT 1 - Player 1 > Redefine Keys'
+-'Option > Bios/Misc Files...' to configure the BIOS.
+Genesis:
+Genesis ————> Genesis_OS_ROM.bin
+32X:
+M68000 —————> 32X_G_BIOS.BIN
+Master SH2 —> 32X_M_BIOS.BIN
+Slave SH2 ——> 32X_S_BIOS.BIN
+Sega CD:
+USA (U) ————> scd_110.bin
+EUR (E) ————> mcd2_200.bin
+JAP (J) ————> mcd_101.bin
+Browse to your ROMs folder and load a game so the emulator recognizes the root
+directory of the games.
+Note: the Sega CD games doesn't work in Kaillera mode.
+~ To start playing online: 'File > Netplay'
+Press Ctrl+C (while playing) to stop the emulation properly.
+↓ ROMs (2-Player simultaneous games)
+https://mega.nz/#F!YVEhgY7Z!DN3HphHiNBVbcbm4c051gw
+» FAQ:
+http://www.gens.me/faq.shtml#gensf
+ __ __ __ __ ______
+| \/ | /\ | \/ | ____|
+| \ / | / \ | \ / | |__
+| |\/| | / /\ \ | |\/| | __|
+| | | |/ ____ \| | | | |____
+|_| |_/_/ \_\_| |_|______|
+[Description]
+MAME (an acronym of Multiple Arcade Machine Emulator) is an emulator application
+designed to recreate the hardware of arcade game systems in software on modern
+personal computers and other platforms.
+↓ Downloads
+• MAME BIOS Pack*
+https://remz.ca/kaillera/emu/MAME_Bios_Pack.zip
+• MAME32k 0.64 (Feb 3 2003)
+http://remz.ca/umk3/mame32k0.64en-ok.zip
+• MAME32++ 0.119 (Sep 14 2007)
+http://remz.ca/umk3/mameppk_bin_gcc-0.119-20070914-ok.zip
+• HoubaUI++ 0.125 R13 (Jun 27 2009)**
+https://remz.ca/kaillera/emu/HoubaUIpp_0.125_R13_(Jun_27_2009).zip
+• MAME32 More! 0.84.177 (Sep 7 2016)
+https://remz.ca/kaillera/emu/MAME32_More_0.84.177_(Sep_7_2016).zip
+[Tutorial]
+-'Options > Directories...' select your ROMs folder.
+To set up the controls: load any game and press the Tab key: 'Input (General) > ↹
+Players 1 Controls'
+· Optional changes:
+· MAME32++ / HoubaUI++
+-'Options > Default Game Options... > Display' enable "Run in a window" and "Start
+out maximized"
+-'Options > Default Game Options... > Miscellaneous' enable "Skip game info" and
+disable "Quit game with confirmation"
+· MAME32 More!
+-'Options > Default Game Options... > Miscellaneous' disable "Confirm on exit"
+* Place the BIOS files in the same folder as your ROMs.
+** Use HoubaUI++ to play those 3D games that don't work properly in MAME32++.
+Eg: Bloody Roar 2, Ehrgeiz, Mortal Kombat 4, Street Fighter EX 2 / Plus, Tekken 2,
+Tekken 3, Tekken Tag Tournament, etc.
+------------------
+Some default keys:
+------------------
+F2: Service Mode*
+F3: Reset
+F5: Swap Players Controls (for MAME32k / MAME32 More! - Supports up to 4 players)
+LeftShift+F5~F6: Swap Players Positions
+LeftShift+F7: Create a savestate
+F7: Load the savestate (for MAME32k / MAME32 More!)
+RightShift+F7: Load the savestate (for MAME32++ / HoubaUI++)
+LeftShift+F10: Send DIP Switches to the other players (for MAME32k / MAME32 More! -
+Then press F3 to apply the changes)
+LeftShift+F3: Send DIP Switches to the other players (for MAME32++ / HoubaUI++)
+P: Pause the game while you're playing online (for MAME32k / MAME32 More!)
+1: Start
+5: Coin
+* Not all the games have a Service Mode; If not, check the DIP Switches option
+under the Tab menu. ↹
+To skip the EPPROM errors in some games (eg. Run and Gun, Soccer Superstars) you
+must hold on F2 and press F3 at the same time.
+You don't need to configure anything to play those 4 and 6 players versions, they
+will become 4p or 6p when you play them in Kaillera.
+4 players rules:
+For 2 players: 1p,2p vs cpu
+For 3 players: 1p,2p vs 3p
+For 4 players: 1p,2p vs 3p,4p
+6 players rules:
+For 2 players: 1p,2p vs cpu
+For 3 players: 1p,2p,3p vs cpu
+For 4 players: 1p,2p vs 3p,4p
+For 5 players: 1p,2p,3p vs 4p,5p
+For 6 players: 1p,2p,3p vs 4p,5p,6p
+~ To start playing online:
+-'File > Play network game...' (for MAME32k)
+-'File > Kaillera NetPlay...' (for MAME32++ / HoubaUI++)
+-'File > Play Kaillera Game...' (for MAME32 More!)
+↓ ROMs (2-Player simultaneous games)
+https://mega.nz/#F!dYEmiJYL!OPKSyxRbYYajLh6R-pW6Lg
+↓ ROMs (2-Player simultaneous games) [ROM-Set Pack]
+https://www.mediafire.com/folder/o10thqlx6alfl/
+» FAQ:
+https://wiki.mamedev.org/index.php/Frequently_Asked_Questions
+ __ __ _ _ _____ ______ _ _ __ _ _
+| \/ | | | | __ \| ____| \ | | / /| || | _ _
+| \ / | | | | |__) | |__ | \| |/ /_| || |_ _| |_ _| |_
+| |\/| | | | | ___/| __| | . ` | '_ \__ _|_ _|_ _|
+| | | | |__| | | | |____| |\ | (_) | | | |_| |_|
+|_| |_|\____/|_| |______|_| \_|\___/ |_|
+[Description]
+Mupen64++ is a version of Mupen64 build off the original source with added Kaillera
+support. It has a high rate of compatibility.
+Project64k is a modified version of the Project64 emulator with added netplay
+support through the Kaillera network.
+↓ Downloads
+• Mupen64++ Beta 0.1.3.12
+https://remz.ca/n64/Mupen64++.zip
+↓ Downloads (Older emulators/versions)
+• Project 64k 0.13 (01 Aug 2003)
+https://remz.ca/Project64k.zip
+[Tutorial]
+-'Options > Settings... > Directories' select your ROMs folder.
+-'Options > Input Settings...' set up the controls.
+~ To start playing online:
+Mupen64++: 'Utilities > KailleraClient (Netplay)'
+Project64k: 'File > Start NetPlay...'
+↓ ROMs N64 [No-Intro]
+https://romcollector.asuscomm.com/
+» FAQ:
+https://web.archive.org/web/20150407164327/http://www.pj64-emu.com/faqs/
+ _ _ ______ _____ _______ ____ _____ _____
+| \ | | ____|/ ____|__ __/ __ \| __ \_ _| /\
+| \| | |__ | (___ | | | | | | |__) || | / \
+| . ` | __| \___ \ | | | | | | ___/ | | / /\ \
+| |\ | |____ ____) | | | | |__| | | _| |_ / ____ \
+|_| \_|______|_____/ |_| \____/|_| |_____/_/ \_\
+[Description]
+Nestopia is an open source NES/Famicom emulator designed to emulate the NES
+hardware as accurately as possible.
+↓ Downloads
+• Nestopia UE v1.50
+https://remz.ca/kaillera/emu/nestopia_1.50-win32.zip
+↓ Downloads (Older emulators/versions)
+• Nestopia v1.40
+http://remz.ca/Nestopia140bin-ok.zip
+[Tutorial]
+- 'Options > Input...' set up the controls.
+-'View > Screen Size' select 2X.
+-'Options > Preferences' disable "Confirm exit"
+It's possible to use cheats while playing on Kaillera, going to 'Options >
+Cheats... > Add...'
+https://www.gamegenie.com/cheats/gamegenie/nes/index.html
+Note: all the players should enable the same cheats on the emulator, otherwise the
+game will desync sooner or later.
+~ To start playing online: 'Netplay > Connect', 'Add...' add the ROMs to the list,
+then click on 'Launch..' button.
+↓ ROMs NES & FDS [No-Intro]
+https://romcollector.asuscomm.com/
+ _ _ ____ _____ _______ _ _____ _____
+| \ | |/ __ \ / ____|__ __|/\ | | / ____|_ _| /\
+| \| | | | | (___ | | / \ | | | | __ | | / \
+| . ` | | | |\___ \ | | / /\ \ | | | | |_ | | | / /\ \
+| |\ | |__| |____) | | |/ ____ \| |___| |__| |_| |_ / ____ \
+|_| \_|\____/|_____/ |_/_/ \_\______\_____|_____/_/ \_\
+[Description]
+Nostalgia is a Mattel Intellivision emulator.
+↓ Downloads
+• Nostalgia v5.0
+https://remz.ca/kaillera/emu/Nostalgia_5.0.zip
+[Tutorial]
+-'Tools > Controller Config' set up the controls.
+~ To start playing online: 'File > Start Kaillera'
+» FAQ:
+http://www.intellivision.us/intvgames/nostalgia/nostalgia.php
+ _____ _ _ ______ _____ ___ _ __
+ / ____| \ | | ____|/ ____/ _ \| |/ /
+| (___ | \| | |__ | (___| (_) | ' /
+ \___ \| . ` | __| \___ \\__, | <
+ ____) | |\ | |____ ____) | / /| . \
+|_____/|_| \_|______|_____/ /_/ |_|\_\
+[Description]
+Snes9K is a modified version of the Snes9x emulator with added netplay support
+through the Kaillera network.
+↓ Downloads
+• Snes9K v0.09z
+http://remz.ca/snes9k009z2.exe
+[Tutorial]
+'File > Load Game...' and browse to your ROMs folder, then load a game so the
+emulator recognizes the root directory of the games.
+'Input > Joypad configuration...' to set up the controls.
+Press F12 (while playing online) to swap controls between the first and the second 
+player.
+To be able to play the Kirby games, you must disable the "Enable Multitap 5" option
+in 'File > Kaillera Configuration'.
+By default, the emulator displays this message: If you are using the Mouse,
+SuperScope or Multiplayer Adapter, switch to Controller.
+~ To start playing online: 'File > Play Kaillera Game'
+↓ ROMs SNES & Satellaview [No-Intro]
+https://romcollector.asuscomm.com/
+__ _______ _ _ _ _ ______ _ __
+\ \ / /_ _| \ | | | | | /\ | ____| | |/ /
+ \ \ /\ / / | | | \| | | | | / \ | |__ ______| ' /
+ \ \/ \/ / | | | . ` | | | |/ /\ \ | __|______| <
+ \ /\ / _| |_| |\ | |__| / ____ \| |____ | . \
+ \/ \/ |_____|_| \_|\____/_/ \_\______| |_|\_\
+[Description]
+WinUAE-Kaillera is a computer emulator which emulates the hardware of the Commodore
+Amiga range of computers.
+↓ Downloads
+• WinUAE 0.8.22 R1
+https://www.mediafire.com/folder/o9ccs6nxsx88t/
+[Tutorial]
+<null>
+~ To start playing online: 'Kaillera > Launch Kaillera'
+[ROMs] (List of games included in the pack)
+6tris, Alien Breed, Alien Breed SE, Apidya, Arcade Pool, Blood Money, Bubble
+Bobble, Chaos Engine CD32, Double Dragon 3, Dyna Blaster, E-Motion, Frontal
+Assault, Golden Axe, Gravity Power, Great Courts 2, International Karate +, Jaguar,
+Lemmings - Oh No! More, Lemmings, Lotus, Mega Twins, Mercs, Micro Machines, Mortal
+Kombat, Nitro, North & South, Pang, Parasol Stars, Pinball Dreams, Pinball
+Obsession, Sensible Golf, Sensible Soccer, Settlers, Silkworm, Speedball 2, Spy vs
+Spy, Super Off Road, Super Space Invaders, Super Twin Tris, Supercars 2, SWV,
+Terminator 2 - The Arcade Game, Tetrix, Warzone, Wiz N Liz, Worms DC, Xtreme
+Racing.
+___________________________________________________________________________________
+--------------------
+EmuLinkerSF commands
+--------------------
+/command - Function
+# - Number
+• General commands
+/alivecheck - Allows a user to check if he/she is still connected
+to the server.
+/finduser <nickname> - Allows a user to find in what game another user is,
+and what is his/her User ID.
+/help - Brings up the command.
+/ignore ~ /unignore <User ID> - Allows a user to ignore or unignore another user.
+/ignoreall ~ /unignoreall - Allows a user to ignore or unignore the entire
+server.
+/me <message> - Allows a user to “emote” on the general chat.
+/msg <User ID> - Allows a user to send a private message to another
+user in the server.
+/msgon ~ /msgoff - Allows a user to enable or disable the reception of
+private messages.
+/myip - Allows a user to see what its IP address is.
+/version - Allows a user to see which version of EmuLinker the
+server is running.
+• Game room commands
+/detectautofire 0 ~ 5 - Allows a user to scan and check if another user in
+the game is using autofire.
+/help - Brings up the command.
+/lagreset - Resets the counter of lag spikes.
+/lagstat - Shows the amount of lag spikes that each user in
+the game room has.
+/maxping # - Allows the host of a game to set the highest ping
+allowed to enter the game.
+/maxusers # - Allows the host of a game to set the maximum amount
+of users allowed in the game room at one time.
+/mute ~ /unmute <User ID> - Stops a specific user from typing in-game.
+/muteall ~ /unmuteall - Stops users from typing in-game.
+/num - Allows a user to see what is the number of users
+inside a game room.
+/p2pon ~ /p2poff - Allows faking P2P. This option ignores all the
+server activity during gameplay.
+/samedelay true ~ false - Allows the host to set the game delay. If the owner
+chooses to play with the same delay,
+ all the players will be playing with the delay of
+the user with the worst ping.
+/setemu - Restricts the game room to the emulator the host is
+using. Ex. “MAME32k”, “Project64k”, etc.
+/setconn - Allows a user to restrict the connection type to
+the one the user has set up for itself.
+/startn # - The game will start automatically when a certain
+amount of users join to the game room.
+/swap # - Swap the controls for each user in the game room.**
+ **Compatible with all the emulators (except ePSXe).
+------------------------
+Kaillera client commands (Nov 1 2007)
+------------------------
+• General commands
+/clear - Allows a user to clear all the text of the general
+chat.
+/pcs - Similar to the “stats” command: shows the amount of
+lost/misorder packets.
+/reconnect - Allows a user to reconnect to the server
+automatically.
+/stats - Allows a user to see what is the bandwidth consumed
+on the server in real-time.
+/swm - Allows a user to switch the screen between its
+current game room and the server's games list.
+-------------
+UOKS commands (v0.92)
+-------------
+• Game room commands
+/lagreset - Resets the lag-checking system (use it shortly
+before /lagstat if game has been running awhile).
+/lagstat - Displays the number of lag spikes each game room
+user has.
+/limit # - Sets user limit for game lobby. User limit defaults
+to 8, and can't be changed to a number less than the number of users currently in
+the game, nor can it be changed to a number greater than the user limit of the
+server, or 32, whichever is less. User limits are enforced.
+/start - This command starts the game, the same as the start
+button in the default client. This is necessary so that game hosts who have
+'inherited' their power from a previous host leaving the game can still start the
+game, despite their client not otherwise having an interface for it.
+/swap #### - Remaps user inputs on the fly, while game is
+playing. User inputs are reset on game start. Only the first 8 user inputs can be
+remapped, or used for remapping. Duplicates are allowed. The numbers supplied are
+the original player numbers, and are not affected by previous '/swap' commands.
+Using a '0' for a player's input means 'don't change from previous mapping'. The
+first example '/swap 01' does not change the input currently used for player 1, but
+uses player 1's input for player 2. The second example '/swap 20663' uses player
+2's input for player 1, player 6's input for 3 and 4, and player 3's input for 5.
+/swapreset - This command resets all input mappings in the game
+to the state they would be in if no '/swap' commands had ever been issued.
+---------------------
+Table of delay frames
+---------------------
+Ping Delay value
+1. LAN (60 packets/s)
+0–16 1 frame
+17–33 2 frames
+34–49 3 frames
+50–66 4 frames
+67–83 5 frames
+84–99 6 frames
+100–116 7 frames
+117–133 8 frames
+134–149 9 frames
+150–166 10 frames
+167–183 11 frames
+184–199 12 frames
+2. Excellent (30 packets/s)
+0–33 3 frames
+34–66 5 frames
+67–99 7 frames
+100–133 9 frames
+134–166 11 frames
+167–199 13 frames
+3. Good (20 packets/s)
+0–49 5 frames
+50–99 8 frames
+100–149 11 frames
+150–199 14 frames
+4. Average (15 packets/s)
+0–66 7 frames
+67–133 11 frames
+134–199 15 frames
+5. Low (12 packets/s)
+0–83 9 frames
+84–166 14 frames
+167–199 19 frames
+6. Bad (10 packets/s)
+0–99 11 frames
+100–199 17 frames
+In order to have a decent input-lag when playing online, it is preferable to have a
+ping below 100 (or less than 10 frames delay).
+___________________________________________________________________________________
+•••••••••••••••••••••••••••••••••••••••••
+• Kaillera FAQ section (Partial backup) •
+•••••••••••••••••••••••••••••••••••••••••
+► Why is my game so laggy when I play? | What is lag? What is desync? What does
+"Ping" mean?
+When you play games over the Internet, you can be playing against someone that is
+across the world. When speed is concerned, you start to run into concept of the
+speed of light.
+Say I'm in New York, and I want to play a server in Tokyo. That's about 6760 miles.
+The speed of light is approximately 186,000 miles per second. In ideal conditions,
+your signal has to go from your computer to the server, and back. Assume that this
+electronic communication happens at the speed of light. (Which it does not. There
+are other problems due to overhead, A/D conversions, etc. Not to mention that
+electricity travels a bit slower than the speed of light.)
+So, we have to go 6760 miles there, and 6760 miles back. That's 13520 miles. At the
+speed of light, it would take about 72.688 ms ([13520mi / 186000 mi/sec] *
+1000ms/sec). So, at best you can have a 72 ms ping. (Not taking into account time
+lost by routing hops, A/D conversion, network overhead, latency, etc.)
+You really can't defeat the speed of light.
+• Lag: AKA network latency and ping time. If you say you are "lagging",
+network-savvy people are going to think that when you press a key, your actions are
+delayed. Lag is NOT shown when you are playing but the game appears to have locked
+and none of the keys work. That is called...
+• Packet Loss: Over the TCP/IP and UDP protocols and the others, data is sent out
+in little packets of data. I believe it is approximately a few hundred bytes,
+(someone who knows, please let me know). The receiving computer reassembles these
+packets, according to stamps on them, into what it was supposed to be. In UDP,
+which Kaillera uses, these can be received out of order and there's a timestamp on
+them so that they can expire. Ex.: If you're playing a fighter and you press a
+punch, you don't want it to be received after the kick you pressed first; fighting
+would be downright hilarious. You may never get a UDP packet since it is just sent
+once and that's it. Once it's expired, if your computer ever DOES get it, the
+packet is checked against the computer's clock and just ignores it.
+In TCP/IP, packet loss does not happen as often, and the participating computers
+connection seems to last longer, usually until both computers feel the connection
+has just been lost. (This is why IRC, laggy as all hell, still works). TCP/IP
+replies with what we call an "ACK" (acknowledgement) when a packet has been
+received. Until that, the other computer keeps sending the little packet out until
+it gets the "ACK". The problem is, this takes up bandwidth on a connection, thus
+for things like Kaillera, UDP is much more preferred so lag can be reduced.
+• Choppiness: You will see choppiness in the game if there is some lag happening.
+The resulting effect from packet loss in UDP is that you may have some packets that
+are not received. This would not only cause lag, since the timing would be held
+back, but you may also miss a transmitted move or button press. One of the benefits
+of UDP is that all of the bandwidth of both computers is used to full and not
+wasted resending packets. The problem is if a packet is not received the computer
+that was supposed to get it has nothing to do. With the way Kaillera is set up,
+(which it has to be, or desyncs would occur whenever a packet is lost) the program
+is set to stick until it receives a packet so the other player(s) can move. Work
+some brain cells for a second and you can see this was the only sensible thing to
+do. This prevents Kaillera from desyncing. Those of you who frequently get perfect
+games feel rested: you are getting relatively low packet loss: less than 5%. 0 is
+quite uncommon just because there's so much traffic everywhere. High speed
+connections usually have much lower rates of packet loss than dialup. This entire
+process works so fast however that even though you think you're playing a smooth
+game, packets are still getting dropped and despite the fact that this is
+happening, you can't tell Kaillera has stopped working for 2 milliseconds.
+In addition, Kaillera implements modern technology which make UDP packet
+transmission much more reliable. But even with that, if your connection is bad,
+there's no magical way around it.
+If your games keep getting choppy, check out what's going on with your Internet
+connection. For instance, if you're in the middle of any file transfer while
+playing with Kaillera or are using other bandwidth-eating applications.
+► What is the "Connection" setting used for, and what should I put there?
+You usually should leave it on it's default setting of "Good". The "Connection"
+setting will tell Kaillera how many packets it will send each second. A rate of 20
+packets per second is usually good for all types of connections. See the above
+entry regarding packet loss. If you send less packets per second, the connection
+will be more reliable and your game will be less choppy. The downside is that if
+you choose a connection setting too low, you may feel that it is too tough to
+complete complicated moves, such as those required in most common fighting games.
+The "Good" setting is truly and decent medium.
+► Help! My game goes out of sync! (aka. desync) Why?
+Desync is a thorn in the side of playing emulators over a network. If you want to
+know why this also happens in PC games, keep reading this paragraph, otherwise skip
+down a bit. This also comes up in real time strategy games. For example Starcraft,
+those of you that play(ed) it, you know each player can have around 100 or more
+units, not to mention buildings, at once. Maybe each on screen "entity" takes about
+200 bytes. That's 200 entities for each player, 4 kilobytes for those entities. If
+there are 8 players, that's 32k. Your 56k modem can not send 32 kilobytes per
+second reliably. In the game Black and White, you can have unlimited amounts of
+villagers. The more villagers, the more houses, food, wood, and prayer power you
+get. That's a ton of data that needs to be sent to EVERY player. Peer-to-Peer games
+do not usually send every single piece of data to each computer. Obviously, that
+would be too much data to send consistently, and quite a waste of time. So instead,
+they do something like what Kaillera does, send tiny updates.
+In essence, Kaillera just sends keystrokes. The server you connect to is the host,
+NOT whoever makes the room for the game. Every key you press while playing is sent
+to the server you connect to and it then routes it back to you and to everyone
+else. Again, it does not matter who hosts a game, the playing experience on a
+single server will be the pretty much the same unless one player reconnects to
+their ISP.
+When you press a key while in Kaillera, as stated above, it is sent to the server
+and sent to everyone else:
+ - Player 1
+ /
+Server - Player 2
+ \
+ - Player 3
+If player 1 presses punch, it goes to the server, and then it follows the lines
+back to each player. If one player is experiencing heavy packet loss, all players
+stick because as mentioned in the above topic:
+Kaillera waits for keystrokes. As you can imagine this is very unreliable. It's
+like telling a person to remember a sentence for you and you can tell them to go
+back and forward, delete words and add words. If one of you screws up going
+forward, back, add or remove and then you both write the sentence out, you get
+modified sentences. The result is one of you could still have the correct new
+sentence but since the other person screwed up, you are "desynced". This is exactly
+what happens with a desync. One of the player's Kaillera will "think" about
+something differently. It could also be caused by packet corruption that was
+somehow received (though the likelihood of that is low, it does happen). Since
+nothing but keys are sent, there is no way currently feasible to synchronize. One
+possibility that is being explored is to copy byte for byte the game's "state" from
+one computer to all the others. Technically you could "teleport" if you were
+playing a game like Dungeons & Dragons, to each other and you would be synched but
+usually it's not that easy. You could have different scores and stuff. This tiny
+update stuff is the blind leading the blind. Each client blindly assumes the other
+clients have exactly what it has. Usually this works. When there's a desync, it
+doesn't.
+With the keystroke method the best way to check for a desync is compare scores.
+Tell each player your score and have them tell you what they see your score as. If
+it's different, you're desynced. You can also check to see if players are hitting
+the air.
+Packet corruption would seem the most likely culprit for desync. This is when
+somehow, over the network, the packet gets a bit or more changed in it. TCP/IP has
+a quick check I think and discards corrupted packets and doesn't send the ACK. UDP
+doesn't care, and just drops it. Corrupted packets are supposed to be dropped but
+it can be possible to receive a corrupted packet and try to use it. I don't think
+this happens often. Usually corruption is faulty hardware. I don't know if this is 
+the case, but if these corrupted packets are sent off as being correct, received
+and used, this causes HORRIBLY unwanted results.
+> Source: http://www.kaillera.com/faq.php
+••••••••••••••••••••••••••••••••••••••••••••••••••••
+• Kaillera P2P client FAQ section (Partial backup) •
+••••••••••••••••••••••••••••••••••••••••••••••••••••
+Q: What's this?
+A: It's a Kaillera client file for Kaillera supported emulators that allows you to
+connect directly to your opponent to play.
+Q: Why would I want to connect directly? What's wrong with playing with normal
+client in Kaillera servers?
+A: There's nothing wrong with playing with normal client in Kaillera servers. This
+isn't a replacement for our good old trusty reliable Kaillera. This is merely an
+extra option for users who wants to directly connect to their opponent's machine
+and play with half the response delay of playing in Kaillera servers.
+Q: I hosted and my IP address is 127.0.0.1:27886 but how come my friend can't
+connect? How do I get my IP?
+A: 127.0.0.1 is the loopback IP address. I.e. it will always point to your own
+computer. So someone on the Internet or even your local network can't connect on
+the Internet to you using this IP address. To connect you will need your external
+IP address.
+https://www.whatismyip.com/
+Q: Does it give any advantage to low pingers over high pingers like normal
+Kaillera?
+A: No. Ping (a.k.a. latency) can be seen as a network property between 2 endpoints.
+There are only 2 endpoints in P2P and hence both users share the same ping.
+Q: How do I change my connection setting to "Good" connection setting?
+A: You can't! By default, it behaves like "LAN" on Kaillera. If you are having lag
+spike problems, an option to allow for one and two extra frames delay to smooth the
+game out further has been added and is configurable by host.
+Q: Does host have any advantage? How is host different to connector?
+A: No. Host is obviously the one who is connected to. Host has the privilege of
+taking certain initiatives such as calculating average ping and throughput but
+nothing special. Client's clock also gets synchronized emit the same time as host.
+On the negative side, host needs to have the hosting port forwarded in the router
+so the connector can connect. Once the game starts, both behave identically.
+Q: Does host have to fill in the "Peer IP" box?
+A: No. That's the only box the connector has to fill in. Host has to fill in
+everything else.
+Q: I did all that but the other player can't see my game.
+A: The most probable reason for this is if you don't have your hosting ports
+forwarded. By default, port is 27886/UDP must be forwarded to be able to host
+games.
+Q: It's possible to play via P2P with more than 2 players?
+A: Unfortunately no. Use standard Kaillera servers which support up to 8 players
+per game.
+Q: How does it's delay compare to Kaillera?
+A: The delay in it's vary close to half of the ping between the users (RTT/2)
+whereas the delay in normal Kaillera should converge to ping between the user and
+server (again RTT) as higher connection settings are used. Note that Kaillera as
+well as most of the emulators who incorporate Kaillera are discrete implementations
+and they works in terms of whole frames (typically and assumed to be 16.66667 ~ 17
+ms) instead of fractions.
+Q: Why are my games going choppy when I use this?
+A: The connection between you and your peer isn't that consistent. Use the
+"Smoothing" option when playing this peer.
+- "If near UB" adds 8ms to your ping time before the delay is locked in.
+- "Always" adds an extra frame of delay.
+- "Extra" adds two extra frames of delay.
+> Source: http://p2p.kaillera.ru/
+▲ Why partial backups? Obsolete and useless questions were removed. It has also
+been revised and updated.
+___________________________________________________________________________________
+___________________________________________________________________________________
+•••••••••••••••••••••••••••••
+• Kaillera Network Protocol •
+•••••••••••••••••••••••••••••
+Kaillera network protocol analysis started originally by Anthem and Okai project.
+Completed by SupraFast with help from Moosehead.
+Master server format analysis by SupraFast.
+'--------------------------------------------------------------------------------
+'Protocol
+'--------------------------------------------------------------------------------
+'//Logging in State
+'Client: HELLO0.83
+'Server: Port notify HELLOD00D#\0 [# = new port number. eg. HELLOD00D7159]
+' or TOO\0 [if server is full]
+'Client: User Login Information [0x03]
+'Server: Server to Client ACK [0x05]
+'Client: Client to Server ACK [0x06]
+'Server: Server to Client ACK [0x05]
+'Client: Client to Server ACK [0x06]
+'Server: Server to Client ACK [0x05]
+'Client: Client to Server ACK [0x06]
+'Server: Server to Client ACK [0x05]
+'Client: Client to Server ACK [0x06]
+'***ACK's calculate one's ping. Generally 4 are sent, but not always. Clients _
+' respond to Server ACK's***
+'Server: Server Status [0x04]
+'Server: User Joined [0x02]
+'Server: Server Information Message [0x17]
+'
+'//Global Chat State
+'Client: Global Chat Request [0x07]
+'Server: Global Chat Notification [0x07]
+'
+'//Game Chat State
+'Client: Game Chat Request [0x08]
+'Server: Global Chat Notification [0x08]
+'
+'//Create Game State
+'Client: Create Game Request [0x0A]
+'Server: Create Game Notification [0x0A]
+'Server: Update Game Status [0x0A]
+'Server: Player Information [0x0D]
+'Server: Join Game Notification [0x0C]
+'Server: Server Information Message [0x17]
+'
+'//Join Game State
+'Client: Join Game Request [0x0C]
+'Server: Update Game Status [0x0E]
+'Server: Player Information [0x0D]
+'Server: Join Game Notification [0x0C]
+'
+'//Quit Game State
+'Client: Quit Game Request [0x0B]
+'Server: Update Game Status [0x0E]
+'Server: Quit Game Notification [0x0B]
+'
+'//Close Game State
+'Client: Quit Game Request [0x0B]
+'Server: Close Game Notification [0x10]
+'Server: Quit Game Notification [0x0B]
+'
+'//Start Game State
+'Client: Start Game Request [0x11]
+'Server: Update Game Status [0x0E]
+'Server: Start Game Notification [0x11]
+'Client: *Netsync Mode* Wait for all players to give: Ready to Play Signal [0x15]
+'Server: Update Game Status [0x0E]
+'Server: *Playing Mode* All players are ready to start: Ready to Play Signal
+Notification [0x15]
+'Client(s): Exchange Data. Game Data Send [0x12] or Game Cache Send [0x13]
+'Server: Sends data accordingly. Game Data Notify [0x12] or Game Cache Notify
+[0x13]
+'
+'//Drop Game State
+'Client: Drop Game Request [0x14]
+'Server: Update Game Status [0x0E]
+'Server: Drop Game Notification [0x14]
+'
+'//Kick Player State
+'Client: Kick Request [0x0F]
+'Server: Quit Game Notification [0x0B]
+'Server: Update Game Status [0x0E]
+'
+'//User Quit State
+'Client: User Quit Request [0x01]
+'Server: User Quit Notification [0x01]
+'
+'--------------------------------------------------------------------------------
+'--------------------------------------------------------------------------------
+'Server List - http://www.kaillera.com/raw_server_list.php
+' http://www.kaillera.com/raw_server_list2.php
+'--------------------------------------------------------------------------------
+'Note: LF = LineFeed = 10
+'
+'Format: serverName[LF]ipAddress:port;users/maxusers;gameCount;version;location[LF]
+'
+'Example:
+'
+'Unknown Server
+'111.111.111.111:27888;0/10;0.86;Europe
+'--------------------------------------------------------------------------------
+'--------------------------------------------------------------------------------
+'Packet format: multi bytes in little endian format [1st_Byte * 256 + 2nd_Byte]
+'--------------------------------------------------------------------------------
+'//Initial byte
+'1B - byte - Number of messages in packet [generally you will always have n-3
+messages. _
+' During gameplay, it may be necessary to
+increase.]
+'
+'//5 byte header before each message
+'2B - word - The number of this message; every message sent is increased by 1.
+'2B - word - Length of this message; includes message type and size of data being
+sent
+'1B - byte - Message type ex). 0x03 User Login
+'
+'//Message
+'Data
+'
+'[Repeats 5 byte header and Data for each message]
+'
+'eg). (1B), 2B,2B,1B,DataA [Repeats} 2B,2B,1B,DataB [Repeats] 2B,2B,1B,DataC and
+etc.
+'eg). User Quit Request [0x01]: (01), 01,00, 04,00, 01, 00,00,FF
+' initial message# Length Type Data
+' ^
+' Note: We are only sending one message! If it were
+_
+' 2 messages this would be 02.
+'The packet to send would look like this: 01,01,00,04,00,01,00,00,FF
+'--------------------------------------------------------------------------------
+'--------------------------------------------------------------------------------
+'Message Types [all multi-bytes are in little endian format]
+'Assume all strings end in "\0". Empty Strings are just "\0"
+'--------------------------------------------------------------------------------
+' 0x01 = User Quit
+' Client Request:
+' NB : Empty String [00]
+' 2B : 0xFF
+' NB : Message
+'
+' Server Notification:
+' NB : Username
+' 2B : UserID
+' NB : Message
+'
+' 0x02 = User joined
+' Server Notification:
+' NB : Username
+' 2B : UserID
+' 4B : Ping
+' 1B : Connection Type (6=Bad, 5=Low, 4=Average, 3=Good, 2=Excellent, &
+1=LAN)
+'
+' 0x03 = User Login Information
+' Client Notification
+' NB : Username
+' NB : Emulator Name
+' 1B : Connection Type (6=Bad, 5=Low, 4=Average, 3=Good, 2=Excellent, &
+1=LAN)
+'
+' 0x04 = Server Status
+' Server Notification:
+' NB : Empty String [00]
+' 4B : Number of Users in Server (not including you)
+' 4B : Number of Games in Server
+' NB : List of Users
+' NB : Username
+' 4B : Ping
+' 1B : Connection Type (6=Bad, 5=Low, 4=Average, 3=Good,
+2=Excellent, & 1=LAN)
+' 2B : UserID
+' 1B : Player Status (0=Playing, 1=Idle)
+' NB : List of Games
+' NB : Game Name
+' 4B : GameID
+' NB : Emulator Name
+' NB : Owner of Room
+' NB : Number of Players/Maximum Players [MvC: 2/2, MvC4P: 4/2]
+' 1B : Game Status (0=Waiting, 1=Playing, 2=Netsync)
+'
+' 0x05 = Server to Client ACK
+' Server Notification:
+' NB : Empty String [00]
+' 4B : 00
+' 4B : 01
+' 4B : 02
+' 4B : 03
+'
+' 0x06 = Client to Server ACK
+' Client Notification:
+' NB : Empty String [00]
+' 4B : 00
+' 4B : 01
+' 4B : 02
+' 4B : 03
+'
+' 0x07 = Global Chat
+' Client Request:
+' NB : Empty String [00]
+' NB : Message
+'
+' Server Notification:
+' NB : Username
+' NB : Message
+'
+' 0x08 = Game Chat
+' Client Request:
+' NB : Empty String [00]
+' NB : Message
+'
+' Server Notification:
+' NB : Username
+' NB : Message
+'
+' 0x09 = Client Keep Alive
+' Client Request:
+' NB : Empty String [00]
+'
+' 0x0A = Create Game
+' Client Request:
+' NB : Empty String [00]
+' NB : Game Name
+' NB : Empty String [00]
+' 4B : 0xFF
+'
+' Server Notification:
+' NB : Username
+' NB : Game Name
+' NB : Emulator Name
+' 4B : GameID
+'
+' 0x0B = Quit Game
+' Client Request:
+' NB : Empty String [00]
+' 2B : 0xFF
+'
+' Server Notification:
+' NB : Username
+' 2B : UserID
+'
+' 0x0C = Join Game
+' Client Request:
+' NB : Empty String [00]
+' 4B : GameID
+' NB : Empty String [00]
+' 4B : 0x00
+' 2B : 0xFF
+' 1B : Connection Type (6=Bad, 5=Low, 4=Average, 3=Good, 2=Excellent, &
+1=LAN)
+'
+' Server Notification:
+' NB : Empty String [00]
+' 4B : Pointer to Game on Server Side [client has no use for this...]
+' NB : Username
+' 4B : Ping
+' 2B : UserID
+' 1B : Connection Type (6=Bad, 5=Low, 4=Average, 3=Good, 2=Excellent, &
+1=LAN)
+'
+' 0x0D = Player Information
+' Server Notification:
+' NB : Empty String [00]
+' 4B : Number of Users in Room [not including you]
+' NB : Username
+' 4B : Ping
+' 2B : UserID
+' 1B : Connection Type (6=Bad, 5=Low, 4=Average, 3=Good, 2=Excellent, &
+1=LAN)
+'
+' 0x0E = Update Game Status
+' Server Notification:
+' NB : Empty String [00]
+' 4B : GameID
+' 1B : Game Status (0=Waiting, 1=Playing, 2=Netsync)
+' 1B : Number of Players in Room
+' 1B : Maximum Players
+'
+' 0x0F = Kick User from Game
+' Client Request:
+' NB : Empty String [00]
+' 2B : UserID
+'
+' 0x10 = Close game
+' Server Notification:
+' NB : Empty String [00]
+' 4B : GameID
+'
+' 0x11 = Start Game
+' Client Request:
+' NB : Empty String [00]
+' 2B : 0xFF
+' 1B : 0xFF
+' 1B : 0xFF
+'
+' Server Notification:
+' NB : Empty String [00]
+' 2B : Frame Delay (eg. (connectionType * (frameDelay + 1) <-Block on
+that frame
+' 1B : Your Player Number (eg. if you're player 1 or 2...)
+' 1B : Total Players
+'
+' 0x12 = Game Data
+' Client Request:
+' NB : Empty String [00]
+' 2B : Length of Game Data
+' NB : Game Data
+' *eg). MAME32K 0.64 = 2 Bytes/Input _
+' Connection Type = (3=Good), so...3 * 2 = 6 Bytes for 1 Player's
+Input)*
+'
+' Server Notification:
+' NB : Empty String [00]
+' 2B : Length of Game Data
+' NB : Game Data
+' *Using same example from above...If both players are on 3=Good
+Connection Type _
+' and there are 2 Players, then the Total size of the incoming data
+should be: _
+' 3 * 2 = 6 Bytes...6 Bytes * 2 Players = 12 Bytes*
+'
+' 0x13 = Game Cache
+' Client Request:
+' NB : Empty String [00]
+' 1B : Cache Position
+' *256 Slots [0 to 255]. Oldest to Newest. When cache is full add
+new _
+' entry at position 255 and shift all the old entries down knocking
+off the oldest. _
+' Search cache for matching data before you send. If found, send
+that cache position, _
+' otherwise issue a Game Data Send [0x12]. When server sends a game
+Data Notify to you, _
+' search for matching cache data, if not found add it to a new
+position*
+'
+' Server Notification:
+' NB : Empty String [00]
+' 1B : Cache Position
+' *Uses same cache procedure as above.*
+'
+' 0x14 = Drop Game
+' Client Request:
+' NB : Empty String [00]
+' 1B : 0x00
+'
+' Server Notification
+' NB : Username
+' 1B : Player Number (which player number dropped)
+'
+' 0x15 = Ready to Play Signal
+' Client Request:
+' NB : Empty String [00]
+' *Send this when your game is ready to start.*
+'
+' Server Notification:
+' NB : Empty String [00]
+' *Receive this when All Players are ready to start.*
+'
+' 0x16 = Connection Rejected
+' Server Notification
+' NB : Username
+' 2B : UserID
+' NB : Message
+'
+' 0x17 = Server Information Message
+' Server Notification:
+' NB : "Server\0"
+' NB : Message
+'--------------------------------------------------------------------------------
+___________________________________________________________________________________
+••••••••••••••••••••••••••••
+• List of Kaillera servers •
+••••••••••••••••••••••••••••
+[America]
+| USA | eL beaN Server (East) ———————> 35.245.177.68:27888
+| CHL | ElrefugiodeShalaka ——————————> 181.43.0.123:27888
+| USA | Emuparadise America —————————> 199.101.98.242:27888
+| BRA | Farofas MK ——————————————————> 35.247.201.155:27888
+| USA | Galaxy ——————————————————————> 198.12.101.16:27888
+| USA | LA Pizza Server —————————————> 104.237.11.154:27888
+| USA | LA (the south) ——————————————> 71.15.37.153:27888
+| BRA | Liperock Oficial Server —————> 18.228.223.222:27888
+| USA | Mortal Kombat War Room ——————> 208.94.244.66:27888
+| USA | Mortal Kombat WaveNet ———————> 198.46.248.14:27888
+| BRA | Republica Old Gamer —————————> 54.232.69.163:27888
+| BRA | Retro Mania —————————————————> 191.252.186.236:27888
+| USA | Salt City Smash —————————————> 107.182.239.77:27888
+| USA | Seattle Pizza Server ————————> 23.227.163.253:27888
+| USA | Smash Tampax ————————————————> 199.167.29.54:27888
+| USA | SSB Chicago —————————————————> 162.211.66.81:27888
+| USA | The Happy Kingdom (Central) —> 185.227.241.81:27888
+| USA | The Happy Kingdom (East) ————> 167.88.48.12:27888
+| USA | The Happy Kingdom (West) ————> 45.151.175.205:27888
+| USA | Wils SanFran Server —————————> 165.227.60.3:27888
+[Asia]
+| JPN | ———————————————————————> otokojuku.ddo.jp 男塾鯖
+| SGP | Dragon Spirit ———————————————> 116.251.223.214:27888
+| VNM | holethanh-thanhhoa server ———> 118.71.2.226:27888
+| KOR | Korea Fast Server 1 —————————> 121.163.78.128:27888
+| KOR | Korea Fast Server 2 —————————> 121.163.78.146:27888
+| CHN | Pigsty Emulator Server ——————> 218.90.167.83:27888
+| KOR | Tekken Battle Net ———————————> 218.147.64.61:10000
+| VNM | TungVL DaNang Server ————————> 14.185.131.177:27888
+[Europe]
+| FRA | 2Many server ————————————————> 91.121.3.197:27888
+| NLD | Remz Wonderland —————————————> 192.210.175.118:27888
+| ESP | EFECTO FM ———————————————————> 78.136.107.189:27888
+| NLD | Emuparadise Europe ——————————> 50.7.189.186:27888
+| FRA | Gamers City —————————————————> 195.154.178.73:27888
+| FRA | Phantasia ———————————————————> 145.239.124.250:27888
+| POL | Zbojnicka Serwerownia ———————> 145.239.81.203:27888
+[Oceania]
+| AUS | AuS Kaillera EMX ————————————> 202.169.104.136:27888
+| AUS | SSB64 Australia 1 ———————————> 45.63.29.150:27888
+[Russia]
+| RUS | Emu-Land ————————————————————> 89.108.88.134:27888
+| RUS | Moscow Entertainment Server —> 31.192.110.105:27888
+| RUS | MSK1 ————————————————————————> 46.188.50.48:27888
+| RUS | NST Kaillera Server —————————> 89.223.121.144:27888
+| RUS | SourceGame ——————————————————> 109.94.2.150:27888
+| RUS | Ultimate Cup ————————————————> 151.248.126.219:27888
+| RUS | Ultimate Cup-2 EKB ——————————> 213.189.216.117:27888
+Revised in April 2021 // Won't be updated anymore, use the EmuLinkerSF Master
+Server List.
+Online backup of the Master Servers List:
+https://kaillera.remz.ca
+___________________________________________________________________________________
+[DISCLAIMER]
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+The access to this collection is provided at no cost to you and is granted for
+research purposes only. Some of the content available may be governed by local,
+national, and/or international laws and regulations, and your use of such content
+is solely at your own risk. You agree to abide by all applicable laws and
+regulations, including intellectual property laws, in connection with your use of
+this article.
+___________________________________________________________________________________
+// Deprecated ~ For archival purposes
+•••••••••••••••
+• SUPRACLIENT •
+•••••••••••••••
+Supraclient is an alternative Kaillera client.
+► Supraclient features:
+- Improved layout.
+- Reduced lag.
+- Bypasses the known EmuLinker login error.
+- Set Max Users & MOTD for gameroom.
+- Additional Options in the Options Tab.
+↓ Downloads
+• Supraclient
+https://emulinker.org/downloads/
+••••••••••••••••••••••••••••••
+• UNOFFICIAL KAILLERA SERVER •
+••••••••••••••••••••••••••••••
+UOKS is an unofficial Kaillera server based on the original binary. It was produced
+from the source code created by decompiling the original Kaillera server binary.
+► UOKS features:
+- Greatly improved internal security (several buffer overflow vulnerabilities
+patched over, far more error-checking on the protocols to prevent unauthorized
+commands / spoofing).
+- Flood protection against chat flooding in game lobbies, as well as game creations
+and joins.
+- MotD support that should work with older Kaillera clients.
+- Two automatic banning systems: one for banning users who have been flooding or
+attempting buffer overflow exploits from entering the server, and one for
+preventing users who have been kicked repeatedly from a game from rejoining it.
+- Additional capabilities given to game lobby creators: setting a limit on the
+number of users that can join the game, user input remapping, and banning a user.
+- Game lobbies close only when empty, not when their creator leaves, the least
+recent player to join the game (otherwise known as player 2) gains all powers of
+the previous host (including commands to start the game and kick users from it,
+since the client has no interface for providing for this case).
+- Improved checking in loading the configuration file.
+- Generally improved performance.
+- Reduced difficulty in establishing an initial connection.
+- Alerts displayed in game lobby when someone joins with a version different from
+the current host/creator.
+- Filtering of whitespace characters other than space characters (carriage returns,
+tabs, etc.) out of chat messages.
+↓ Downloads
+• UnOfficial Kaillera Server
+https://web.archive.org/web/20160326090253/http://www.emuunlim.com/sneese/unofficia
+l-kaillera-0.92-linux.tar.gz
+https://web.archive.org/web/20160326092742/http://www.emuunlim.com/sneese/unofficia
+l-kaillera-0.92-win32.zip
+___________________________________________________________________________________
+___________________________________________________________________________________
+Last updated: Apr 25, 2021
+Please visit https://EmuLinker.org for latest updates

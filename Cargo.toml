@@ -1,25 +1,11 @@
 [package]
 name = "direlera-rs"
-version = "0.1.10"
+version = "0.1.11"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-log = "0.4"
-anyhow = { version = "1.0.66", features = ["backtrace"] }
-bincode = "1.3.3"
-serde = { version = "1.0", features = ["derive"] }
-thiserror = "1.0.37"
-tokio = { version = "1.23.0", features = ["full"] }
-num-traits = "0.2"
-num-derive = "0.3"
-num = "0.4"
-serde_repr = "0.1.9"
-env_logger = "0.10.0"
-chrono = "0.4.23"
-encoding_rs = "0.8.31"
-config = "0.13.3"
-rand = "0.8.5"
-
-
-
+tokio = { version = "1", features = ["full", "rt"] }
+byteorder = "1.4"
+chrono = "0.4"
+bytes = "1.4"
+uuid = { version = "1.0", features = ["v4"] }
