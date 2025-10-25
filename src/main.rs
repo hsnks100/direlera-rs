@@ -1,83 +1,89 @@
-use config::Config;
-use direlera_rs::accept_server::AcceptServer;
-use direlera_rs::room::*;
-use direlera_rs::service_server::*;
-use log::{error, info, log_enabled, Level, LevelFilter};
-use std::collections::HashMap;
-use std::env;
+use handlerf::*;
+use packet_util::*;
 use std::error::Error;
-use std::io::Write;
+use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
+mod kaillera;
+mod packet_util;
+
+mod handlers;
+use handlers::*;
+
+mod game_cache;
+mod game_sync;
+mod simple_game_sync;
+use handlers::data::*;
+
+const MAIN_PORT: u16 = 8080;
+const CONTROL_PORT: u16 = 27888;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    env::set_var("RUST_LOG", "info");
-    env::set_var("RUST_BACKTRACE", "1");
-    let settings = Config::builder()
-        // Add in `./Settings.toml`
-        .add_source(config::File::with_name("./direlera"))
-        // Add in settings from the environment (with a prefix of APP)
-        // Eg.. `APP_DEBUG=1 ./target/app` would set the `debug` key
-        .add_source(config::Environment::with_prefix("APP"))
-        .build()
-        .unwrap();
+    // Bind two UDP sockets: one for main logic (8080) and one for control logic (27888)
+    let main_socket = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", MAIN_PORT)).await?);
+    let control_socket = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", CONTROL_PORT)).await?);
+    println!("Main socket listening on 127.0.0.1:{}...", MAIN_PORT);
+    println!("Control socket listening on 127.0.0.1:{}...", CONTROL_PORT);
 
-    // Print out our settings (as a HashMap)
-    let config_obj = settings.try_deserialize::<HashMap<String, String>>()?;
-    println!("{:?}", config_obj);
-    env_logger::Builder::new()
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "{}:{} {} [{}] - {}",
-                record.file().unwrap_or("unknown"),
-                record.line().unwrap_or(0),
-                chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
-                record.level(),
-                record.args()
-            )
-        })
-        .filter_level(LevelFilter::Info)
-        .init();
-    // env_logger::init();
-    if log_enabled!(Level::Info) {
-        let x = 3 * 4; // expensive computation
-        info!("the answer was: {}", x);
+    let (tx, mut rx) = mpsc::channel::<Message>(100);
+
+    // Centralized AppState with RwLock for efficiency
+    let state = Arc::new(AppState::new(tx.clone()));
+
+    // Task to send responses in the main socket
+    let main_socket_send = main_socket.clone();
+    tokio::spawn(async move {
+        while let Some(message) = rx.recv().await {
+            if let Err(e) = main_socket_send.send_to(&message.data, &message.addr).await {
+                eprintln!("Failed to send response to {}: {}", message.addr, e);
+            }
+        }
+    });
+
+    // Control logic for HELLO0.83 and PING requests (Port 27888)
+    tokio::spawn(handle_control_socket(control_socket.clone()));
+
+    // Main game loop for game-related messages (Port 8080)
+    let mut buf = [0u8; 4096];
+    loop {
+        let (len, src) = main_socket.recv_from(&mut buf).await?;
+        let data = &buf[..len];
+
+        match parse_packet(data) {
+            Ok(messages) => {
+                for message in messages.iter() {
+                    // 0 is special case, it means the first message
+                    if message.message_number == 0 && messages.len() == 1 {
+                        state.packet_peeker.write().await.insert(src, 0);
+                    }
+                }
+                for message in messages {
+                    let mut packet_peeker_lock = state.packet_peeker.write().await;
+                    let message_number_to_process = *packet_peeker_lock.get(&src).unwrap_or(&0);
+
+                    if message.message_number == message_number_to_process {
+                        // Update message number before processing to release lock quickly
+                        packet_peeker_lock.insert(src, message_number_to_process + 1);
+                        drop(packet_peeker_lock); // Explicitly release lock before long operation
+
+                        // Handle message and log errors without crashing
+                        if let Err(e) = handle_message(message, &src, state.clone()).await {
+                            eprintln!("[Error] Failed to handle message from {}: {}", src, e);
+                            // Continue processing other messages instead of crashing
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to parse packet from {}: {}", src, e);
+            }
+        }
     }
-    let main_port = config_obj.get("main_port").unwrap();
-    let socket = UdpSocket::bind(&format!("0.0.0.0:{}", main_port)).await?;
-    error!("Listening on: {}", socket.local_addr()?);
+}
 
-    let server = AcceptServer {
-        socket,
-        buf: vec![0; 1024],
-        to_send: None,
-        config_obj: config_obj.clone(),
-    };
-
-    let session_manager = UserRoom::new();
-    let sub_port = config_obj.get("sub_port").unwrap();
-    let service_sock = UdpSocket::bind(&format!("0.0.0.0:{}", sub_port)).await?;
-    let (tx, rx) = mpsc::channel(32);
-    let mut service_server = ServiceServer {
-        config: config_obj,
-        socket: service_sock,
-        buf: vec![0; 1024],
-        to_send: None,
-        session_manager,
-        game_id: 0,
-        rx,
-        tx,
-    };
-    // tokio::spawn(async move {
-    //     service_server.keepalive_event().await;
-    // }.await;
-
-    tokio::join!(
-        server.run(),
-        service_server.run(), /*service_server.keepalive_timer() */
-    );
-
-    Ok(())
+// Message struct needs to be accessible in both files
+pub struct Message {
+    pub data: Vec<u8>,
+    pub addr: std::net::SocketAddr,
 }
