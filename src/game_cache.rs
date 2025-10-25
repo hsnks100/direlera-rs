@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -10,6 +12,12 @@ const CACHE_SIZE: usize = 256;
 pub struct GameCache {
     /// A deque to hold cached game data.
     cache: VecDeque<Vec<u8>>,
+}
+
+impl Default for GameCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GameCache {
@@ -41,12 +49,14 @@ impl GameCache {
     }
 
     /// Retrieves game data from the cache by position.
+    #[allow(dead_code)]
     pub fn get(&self, position: u8) -> Option<&Vec<u8>> {
         self.cache.get(position as usize)
     }
 }
 
 /// Trait representing a connected client.
+#[allow(dead_code)]
 pub trait ClientTrait: Debug {
     fn id(&self) -> u32;
 
@@ -98,6 +108,7 @@ pub struct FrameResult {
 }
 
 /// Represents the game data processor for handling inputs and outputs.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct GameDataProcessor {
     /// Map of connected clients.
@@ -108,6 +119,12 @@ pub struct GameDataProcessor {
     frame_index: usize,
     /// Stores collected inputs per frame.
     frame_inputs: HashMap<usize, HashMap<u32, Vec<u8>>>,
+}
+
+impl Default for GameDataProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GameDataProcessor {

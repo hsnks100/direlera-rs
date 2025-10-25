@@ -1,9 +1,12 @@
 // Game Data/Game Cache synchronization module with predefined delays and independent send queues
 // Handles KAILLERA protocol's frame synchronization with player-specific delays
 
+#![allow(dead_code)]
+
 use std::collections::VecDeque;
 
 /// Client input message type
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClientInput {
     /// Game Data: contains the actual input bytes (always 2 bytes per frame)
@@ -13,6 +16,7 @@ pub enum ClientInput {
 }
 
 /// Server response message type
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServerResponse {
     /// Game Data: contains the full combined input bytes
@@ -22,6 +26,7 @@ pub enum ServerResponse {
 }
 
 /// Output action that should be taken for a specific player
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerOutput {
     pub player_id: usize,

@@ -1,6 +1,8 @@
 // Simple Game Sync - Cleaner implementation with per-player send buffers
 // Each player has their own independent send buffer
 
+#![allow(dead_code)]
+
 use std::collections::VecDeque;
 
 /// Client input message type
