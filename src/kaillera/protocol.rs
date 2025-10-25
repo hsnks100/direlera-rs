@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 
 pub struct ParsedMessage {
     pub message_number: u16,
+    #[allow(dead_code)]
     pub message_length: u16,
     pub message_type: u8,
     pub data: Vec<u8>,

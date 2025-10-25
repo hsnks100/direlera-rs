@@ -156,11 +156,13 @@ pub struct ClientInfo {
 
 impl ClientInfo {
     /// Adds an input to the pending inputs queue.
+    #[allow(dead_code)]
     fn add_input(&mut self, data: Vec<u8>) {
         self.pending_inputs.push_back(data);
     }
 
     /// Retrieves and removes the next input from the pending queue.
+    #[allow(dead_code)]
     fn get_next_input(&mut self) -> Option<Vec<u8>> {
         self.pending_inputs.pop_front()
     }
