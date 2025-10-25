@@ -20,11 +20,9 @@ Server Notification:
 
 Flow:
 1. Client: Drop Game Request [0x14]
-2. Server: Update Game Status [0x0E] (game_status = 0: Waiting)
-3. Server: Drop Game Notification [0x14] (to all players in the room)
-   - When one player drops, ALL players receive drop notification
-   - Each player receives their OWN username/number (appears as if they dropped themselves)
-   - This forces all players to exit the game simultaneously
+2. Server: Drop Game Notification [0x14] (to all players in the room)
+   - All players receive the username and player number of who dropped
+3. Server: Update Game Status [0x0E] (game_status = 0: Waiting)
 
 Note: This is different from Quit Game (0x0B) which removes players from the room.
 */
@@ -41,29 +39,71 @@ pub async fn execute_drop_game(
     let username = client.username.clone();
 
     // End the game (not the room!)
-    let (was_playing, game_players) = {
+    let (was_playing, game_players, dropper_player_id, pending_outputs) = {
         let mut games = state.games.write().await;
         let game_info = games.get_mut(&game_id).ok_or("Game not found")?;
 
         // Check if game is actually playing
         let was_playing = game_info.game_status == 1;
-        if !was_playing {
-            return Ok(false); // Not playing, nothing to drop
-        }
 
         println!(
             "[DropGame] {} ending game {} - all players will be dropped (room stays open)",
             username, game_id
         );
 
-        // End the game but keep the room
-        game_info.game_status = 0; // Back to Waiting
-        game_info.sync_manager = None; // Clear sync manager
+        // Find dropper's player_id
+        let dropper_player_id = game_info
+            .player_addrs
+            .iter()
+            .position(|addr| addr == src)
+            .ok_or("Dropper not found in game")?;
+
+        // Fill dropper's future inputs with empty data to unblock other players
+        // This allows other players to receive responses for their pending inputs
+        let mut pending_outputs = Vec::new();
+        if was_playing {
+            if let Some(sync_manager) = &mut game_info.sync_manager {
+                let player_delay = sync_manager.get_player_delay(dropper_player_id);
+                // Fill enough frames to handle any pending inputs from other players
+                let frames_to_fill = player_delay * 10; // Conservative estimate
+
+                for _ in 0..frames_to_fill {
+                    let outputs = sync_manager.process_client_input(
+                        dropper_player_id,
+                        crate::simple_game_sync::ClientInput::GameData(vec![0x00, 0x00]),
+                    );
+                    pending_outputs.extend(outputs);
+                }
+
+                println!(
+                    "[DropGame] Filled {} empty frames for player {}, generated {} pending outputs",
+                    frames_to_fill,
+                    dropper_player_id,
+                    pending_outputs.len()
+                );
+            }
+
+            // End the game but keep the room
+            game_info.game_status = 0; // Back to Waiting
+                                       // Note: Keep sync_manager alive to handle any in-flight GC/GD packets
+                                       // Clients will stop sending after receiving drop notification
+        } else {
+            println!(
+                "[DropGame] {} requested drop but game {} already ended - sending confirmation",
+                username, game_id
+            );
+        }
 
         // Get all players for notification (including the one who dropped)
         let game_players: Vec<_> = game_info.players.iter().cloned().collect();
+        let player_addrs = game_info.player_addrs.clone();
 
-        (was_playing, game_players)
+        (
+            was_playing,
+            game_players,
+            dropper_player_id,
+            (pending_outputs, player_addrs),
+        )
     };
 
     // Update all players' status back to IDLE (waiting in room)
@@ -74,34 +114,53 @@ pub async fn execute_drop_game(
         .await?;
     }
 
-    // Update game status for all clients
+    // Send pending outputs to unblock waiting players FIRST
+    let (pending_outputs, player_addrs) = pending_outputs;
+    for output in pending_outputs {
+        let target_addr = &player_addrs[output.player_id];
+
+        let (message_type, data_to_send) = match output.response {
+            crate::simple_game_sync::ServerResponse::GameData(data) => {
+                let mut buf = BytesMut::new();
+                buf.put_u8(0); // Null byte
+                buf.extend_from_slice(&data);
+                (0x12, buf.to_vec())
+            }
+            crate::simple_game_sync::ServerResponse::GameCache(position) => {
+                let mut buf = BytesMut::new();
+                buf.put_u8(0); // Null byte
+                buf.put_u8(position);
+                (0x13, buf.to_vec())
+            }
+        };
+
+        util::send_packet(state, target_addr, message_type, data_to_send).await?;
+    }
+
+    // Send drop game notification to all players
+    // All players receive the username of who dropped the game
+    let dropper_player_num = (dropper_player_id + 1) as u8;
+
+    let mut notification_data = BytesMut::new();
+    notification_data.put(username.as_bytes());
+    notification_data.put_u8(0); // Null terminator
+    notification_data.put_u8(dropper_player_num);
+
+    for player_addr in &game_players {
+        util::send_packet(state, player_addr, 0x14, notification_data.to_vec()).await?;
+    }
+
+    println!(
+        "[DropGame] Sent drop notification about {} (player {}) to all {} players",
+        username,
+        dropper_player_num,
+        game_players.len()
+    );
+
+    // Update game status for all clients AFTER drop notification
     let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
     let status_data = util::make_update_game_status(&game_info)?;
     util::broadcast_packet(state, 0x0E, status_data).await?;
-
-    // Send drop game notification to all players
-    // Each player receives their own username and player number
-    // so it appears as if they dropped the game themselves
-    for (idx, player_addr) in game_players.iter().enumerate() {
-        let player_client = state
-            .get_client(player_addr)
-            .await
-            .ok_or("Player not found")?;
-        let player_username = player_client.username.clone();
-        let player_num = (idx + 1) as u8;
-
-        let mut notification_data = BytesMut::new();
-        notification_data.put(player_username.as_bytes());
-        notification_data.put_u8(0); // Null terminator
-        notification_data.put_u8(player_num);
-
-        util::send_packet(state, player_addr, 0x14, notification_data.to_vec()).await?;
-
-        println!(
-            "[DropGame] Sent drop notification to {} (player {})",
-            player_username, player_num
-        );
-    }
 
     println!(
         "[DropGame] Game ended, room remains with {} players",
