@@ -2,6 +2,8 @@ use crate::*;
 use bytes::{Buf, BufMut, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
+
+use crate::simple_game_sync;
 /*
 '     0x11 = Start Game
 '            Client Request:
@@ -35,16 +37,18 @@ pub async fn handle_start_game(
     let _ = util::read_string(&mut buf); // Empty String
     let _ = buf.get_u32_le(); // 0xFFFF 0xFF 0xFF
 
-    // Initialize GameSyncManager when game starts
+    // Initialize SimpleGameSync when game starts
     util::with_game_mut(&state, src, |game_info| {
         game_info.game_status = 1; // Playing
 
-        // Initialize GameSyncManager with player delays
+        // Initialize SimpleGameSync with player delays
         let delays = game_info.player_delays.clone();
-        game_info.sync_manager = Some(game_sync::GameSyncManager::new(delays));
+        game_info.sync_manager = Some(simple_game_sync::SimpleGameSync::new_without_padding(
+            delays,
+        ));
 
         println!(
-            "[StartGame] Initialized GameSyncManager with {} players",
+            "[StartGame] Initialized SimpleGameSync with {} players",
             game_info.player_addrs.len()
         );
     })

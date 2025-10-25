@@ -4,6 +4,7 @@ use std::error::Error;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::simple_game_sync;
 use crate::*;
 
 pub async fn handle_message(
@@ -193,7 +194,7 @@ pub async fn handle_game_data(
 
     println!("[0x12] Player {} sent {} bytes", player_id, game_data.len());
 
-    // Process with GameSyncManager
+    // Process with SimpleGameSync
     let outputs = {
         let mut games = state.games.write().await;
         let game_info = games.get_mut(&game_id).ok_or("Game not found")?;
@@ -201,10 +202,13 @@ pub async fn handle_game_data(
         let sync_manager = game_info
             .sync_manager
             .as_mut()
-            .ok_or("GameSyncManager not initialized")?;
+            .ok_or("SimpleGameSync not initialized")?;
 
-        // Process input using GameSyncManager
-        sync_manager.process_client_input(player_id, game_sync::ClientInput::GameData(game_data))
+        // Process input using SimpleGameSync
+        sync_manager.process_client_input(
+            player_id,
+            simple_game_sync::ClientInput::GameData(game_data),
+        )
     };
 
     // Send outputs to respective players
@@ -212,14 +216,14 @@ pub async fn handle_game_data(
         let target_addr = &game_info.player_addrs[output.player_id];
 
         let (message_type, data_to_send) = match output.response {
-            game_sync::ServerResponse::GameData(data) => {
+            simple_game_sync::ServerResponse::GameData(data) => {
                 let mut buf = BytesMut::new();
                 buf.put_u8(0); // Empty string
                 buf.put_u16_le(data.len() as u16);
                 buf.put(data.as_slice());
                 (0x12, buf.to_vec())
             }
-            game_sync::ServerResponse::GameCache(position) => (0x13, vec![0x00, position]),
+            simple_game_sync::ServerResponse::GameCache(position) => (0x13, vec![0x00, position]),
         };
 
         println!(
@@ -260,7 +264,7 @@ pub async fn handle_game_cache(
         player_id, cache_position
     );
 
-    // Process with GameSyncManager
+    // Process with SimpleGameSync
     let outputs = {
         let mut games = state.games.write().await;
         let game_info = games.get_mut(&game_id).ok_or("Game not found")?;
@@ -268,11 +272,13 @@ pub async fn handle_game_cache(
         let sync_manager = game_info
             .sync_manager
             .as_mut()
-            .ok_or("GameSyncManager not initialized")?;
+            .ok_or("SimpleGameSync not initialized")?;
 
-        // Process input using GameSyncManager
-        sync_manager
-            .process_client_input(player_id, game_sync::ClientInput::GameCache(cache_position))
+        // Process input using SimpleGameSync
+        sync_manager.process_client_input(
+            player_id,
+            simple_game_sync::ClientInput::GameCache(cache_position),
+        )
     };
 
     // Send outputs to respective players
@@ -280,14 +286,14 @@ pub async fn handle_game_cache(
         let target_addr = &game_info.player_addrs[output.player_id];
 
         let (message_type, data_to_send) = match output.response {
-            game_sync::ServerResponse::GameData(data) => {
+            simple_game_sync::ServerResponse::GameData(data) => {
                 let mut buf = BytesMut::new();
                 buf.put_u8(0); // Empty string
                 buf.put_u16_le(data.len() as u16);
                 buf.put(data.as_slice());
                 (0x12, buf.to_vec())
             }
-            game_sync::ServerResponse::GameCache(position) => (0x13, vec![0x00, position]),
+            simple_game_sync::ServerResponse::GameCache(position) => (0x13, vec![0x00, position]),
         };
 
         println!(

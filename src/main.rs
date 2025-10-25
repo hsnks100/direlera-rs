@@ -13,6 +13,7 @@ use handlers::*;
 
 mod game_cache;
 mod game_sync;
+mod simple_game_sync;
 use handlers::data::*;
 
 const MAIN_PORT: u16 = 8080;
@@ -66,7 +67,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         packet_peeker_lock.insert(src, message_number_to_process + 1);
                         drop(packet_peeker_lock); // Explicitly release lock before long operation
 
-                        handle_message(message, &src, state.clone()).await?;
+                        // Handle message and log errors without crashing
+                        if let Err(e) = handle_message(message, &src, state.clone()).await {
+                            eprintln!("[Error] Failed to handle message from {}: {}", src, e);
+                            // Continue processing other messages instead of crashing
+                        }
                     }
                 }
             }
