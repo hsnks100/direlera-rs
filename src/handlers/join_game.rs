@@ -19,6 +19,10 @@ pub async fn handle_join_game(
     let _ = buf.get_u16_le();
     let _conn_type = buf.get_u8();
 
+    // Get joining player's connection type
+    let client = state.get_client(src).await.ok_or("Client not found")?;
+    let conn_type = client.conn_type;
+
     util::with_client_mut(&state, src, |client_info| {
         client_info.game_id = Some(game_id);
     })
@@ -27,6 +31,8 @@ pub async fn handle_join_game(
     util::with_game_mut(&state, src, |game_info| {
         game_info.players.insert(*src);
         game_info.num_players += 1;
+        game_info.player_addrs.push(*src);
+        game_info.player_delays.push(conn_type as usize); // Use player's connection_type as delay
     })
     .await?;
 

@@ -69,7 +69,7 @@ impl InputCache {
 }
 
 /// Master input queue for a single player
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct MasterInputQueue {
     /// Queue of raw input data (2 bytes per frame)
     queue: VecDeque<Vec<u8>>,
@@ -105,7 +105,7 @@ impl MasterInputQueue {
 }
 
 /// Per-player send queue (independent transmission buffer)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PlayerSendQueue {
     /// Buffers for each player's input data
     /// player_buffers[i] contains the input data from player i
@@ -162,6 +162,7 @@ impl PlayerSendQueue {
 }
 
 /// Game synchronization manager with delay-based architecture
+#[derive(Debug, Clone)]
 pub struct GameSyncManager {
     /// Number of players in the game
     player_count: usize,

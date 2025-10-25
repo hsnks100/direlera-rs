@@ -35,8 +35,18 @@ pub async fn handle_start_game(
     let _ = util::read_string(&mut buf); // Empty String
     let _ = buf.get_u32_le(); // 0xFFFF 0xFF 0xFF
 
+    // Initialize GameSyncManager when game starts
     util::with_game_mut(&state, src, |game_info| {
         game_info.game_status = 1; // Playing
+
+        // Initialize GameSyncManager with player delays
+        let delays = game_info.player_delays.clone();
+        game_info.sync_manager = Some(game_sync::GameSyncManager::new(delays));
+
+        println!(
+            "[StartGame] Initialized GameSyncManager with {} players",
+            game_info.player_addrs.len()
+        );
     })
     .await?;
 
@@ -46,14 +56,18 @@ pub async fn handle_start_game(
     let status_data = util::make_update_game_status(&game_info)?;
     util::broadcast_packet(&state, 0x0E, status_data).await?;
 
-    // Send start game notification
-    for (i, player_addr) in game_info.players.iter().enumerate() {
+    // Send start game notification with each player's delay
+    for (i, player_addr) in game_info.player_addrs.iter().enumerate() {
+        let player_delay = game_info.player_delays[i];
         let mut data = BytesMut::new();
         data.put_u8(0);
-        data.put_u16_le(1); // Frame Delay
-        println!("Sending StartGame FrameDelay={}", 1);
-        data.put_u8((i + 1) as u8); // Player Number
-        data.put_u8(game_info.players.len() as u8); // Total Players
+        data.put_u16_le(player_delay as u16); // Frame Delay (player's connection_type)
+        println!(
+            "Sending StartGame to Player {} with FrameDelay={}",
+            i, player_delay
+        );
+        data.put_u8((i + 1) as u8); // Player Number (1-indexed)
+        data.put_u8(game_info.player_addrs.len() as u8); // Total Players
         util::send_packet(&state, player_addr, 0x11, data.to_vec()).await?;
     }
     Ok(())

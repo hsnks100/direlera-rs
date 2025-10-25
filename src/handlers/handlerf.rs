@@ -4,7 +4,6 @@ use std::error::Error;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::game_cache::ClientTrait;
 use crate::*;
 
 pub async fn handle_message(
@@ -174,7 +173,7 @@ pub async fn handle_game_data(
     src: &std::net::SocketAddr,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
-    println!("Game Data");
+    println!("[0x12] Game Data from {:?}", src);
     let mut buf = BytesMut::from(&message.data[..]);
     let _ = buf.get_u8(); // Empty String
     let data_length = buf.get_u16_le() as usize;
@@ -182,43 +181,53 @@ pub async fn handle_game_data(
 
     let client = state.get_client(src).await.ok_or("Client not found")?;
     let game_id = client.game_id.ok_or("Game ID not found")?;
-    let user_id = client.user_id;
 
-    // Process game data
-    let frame_result = {
+    // Find player_id from address
+    let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
+    let player_id = game_info
+        .player_addrs
+        .iter()
+        .position(|addr| addr == src)
+        .ok_or("Player not in game")?;
+
+    println!("[0x12] Player {} sent {} bytes", player_id, game_data.len());
+
+    // Process with GameSyncManager
+    let outputs = {
         let mut games = state.games.write().await;
         let game_info = games.get_mut(&game_id).ok_or("Game not found")?;
 
-        game_info
-            .processor
-            .process_incoming(user_id as u32, game_data.clone())
-            .await;
+        let sync_manager = game_info
+            .sync_manager
+            .as_mut()
+            .ok_or("GameSyncManager not initialized")?;
 
-        game_info.processor.process_frame().await
+        // Process input using GameSyncManager
+        sync_manager.process_client_input(player_id, game_sync::ClientInput::GameData(game_data))
     };
 
-    if let Some(frame_result) = frame_result {
-        let data_to_send = if frame_result.use_cache {
-            vec![0x00, frame_result.cache_pos]
-        } else {
-            let mut data = BytesMut::new();
-            data.put_u8(0);
-            data.put_u16_le(frame_result.data_to_send.len() as u16);
-            data.put(frame_result.data_to_send.as_slice());
-            data.to_vec()
+    // Send outputs to respective players
+    for output in outputs {
+        let target_addr = &game_info.player_addrs[output.player_id];
+
+        let (message_type, data_to_send) = match output.response {
+            game_sync::ServerResponse::GameData(data) => {
+                let mut buf = BytesMut::new();
+                buf.put_u8(0); // Empty string
+                buf.put_u16_le(data.len() as u16);
+                buf.put(data.as_slice());
+                (0x12, buf.to_vec())
+            }
+            game_sync::ServerResponse::GameCache(position) => (0x13, vec![0x00, position]),
         };
 
         println!(
-            "[GD] send data: {:?}, {}",
-            data_to_send, frame_result.use_cache
+            "[→ P{}] 0x{:02X} with {} bytes",
+            output.player_id,
+            message_type,
+            data_to_send.len()
         );
-        util::send_packet(
-            &state,
-            src,
-            if frame_result.use_cache { 0x13 } else { 0x12 },
-            data_to_send,
-        )
-        .await?;
+        util::send_packet(&state, target_addr, message_type, data_to_send).await?;
     }
 
     Ok(())
@@ -229,45 +238,64 @@ pub async fn handle_game_cache(
     src: &std::net::SocketAddr,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
+    println!("[0x13] Game Cache from {:?}", src);
     let mut buf = BytesMut::from(&message.data[..]);
     let _ = buf.get_u8(); // Empty String
     let cache_position = buf.get_u8();
 
     let client = state.get_client(src).await.ok_or("Client not found")?;
     let game_id = client.game_id.ok_or("Game ID not found")?;
-    let client_id = client.id();
 
-    // Process game cache
-    let frame_result = {
+    // Find player_id from address
+    let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
+    let player_id = game_info
+        .player_addrs
+        .iter()
+        .position(|addr| addr == src)
+        .ok_or("Player not in game")?;
+
+    println!(
+        "[0x13] Player {} sent cache position {}",
+        player_id, cache_position
+    );
+
+    // Process with GameSyncManager
+    let outputs = {
         let mut games = state.games.write().await;
         let game_info = games.get_mut(&game_id).ok_or("Game not found")?;
 
-        game_info
-            .processor
-            .process_incoming(client_id, vec![cache_position])
-            .await;
+        let sync_manager = game_info
+            .sync_manager
+            .as_mut()
+            .ok_or("GameSyncManager not initialized")?;
 
-        game_info.processor.process_frame().await
+        // Process input using GameSyncManager
+        sync_manager
+            .process_client_input(player_id, game_sync::ClientInput::GameCache(cache_position))
     };
 
-    if let Some(frame_result) = frame_result {
-        let data_to_send = if frame_result.use_cache {
-            vec![0x00, frame_result.cache_pos]
-        } else {
-            let mut data = BytesMut::new();
-            data.put_u8(0);
-            data.put_u16_le(frame_result.data_to_send.len() as u16);
-            data.put(frame_result.data_to_send.as_slice());
-            data.to_vec()
+    // Send outputs to respective players
+    for output in outputs {
+        let target_addr = &game_info.player_addrs[output.player_id];
+
+        let (message_type, data_to_send) = match output.response {
+            game_sync::ServerResponse::GameData(data) => {
+                let mut buf = BytesMut::new();
+                buf.put_u8(0); // Empty string
+                buf.put_u16_le(data.len() as u16);
+                buf.put(data.as_slice());
+                (0x12, buf.to_vec())
+            }
+            game_sync::ServerResponse::GameCache(position) => (0x13, vec![0x00, position]),
         };
 
-        util::send_packet(
-            &state,
-            src,
-            if frame_result.use_cache { 0x13 } else { 0x12 },
-            data_to_send,
-        )
-        .await?;
+        println!(
+            "[→ P{}] 0x{:02X} cache_pos or {} bytes",
+            output.player_id,
+            message_type,
+            data_to_send.len()
+        );
+        util::send_packet(&state, target_addr, message_type, data_to_send).await?;
     }
 
     Ok(())

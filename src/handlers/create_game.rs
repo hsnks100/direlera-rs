@@ -22,7 +22,7 @@ pub async fn handle_create_game(
     let game_id = state.next_game_id();
 
     // Get client_info
-    let (username, emulator_name, _conn_type, _user_id) =
+    let (username, emulator_name, conn_type, _user_id) =
         util::fetch_client_info(src, &state).await?;
 
     // Create new game
@@ -37,7 +37,9 @@ pub async fn handle_create_game(
         max_players: 4,
         game_status: 0, // Waiting
         players,
-        processor: game_cache::GameDataProcessor::new(),
+        sync_manager: None, // Will be initialized when game starts
+        player_addrs: vec![*src],
+        player_delays: vec![conn_type as usize], // Use creator's connection_type as delay
     };
 
     // Add game

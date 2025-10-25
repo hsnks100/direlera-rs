@@ -194,7 +194,12 @@ pub struct GameInfo {
     pub owner: String,
     pub num_players: u8,
     pub max_players: u8,
-    pub game_status: u8,                        // 0=Waiting, 1=Playing, 2=Netsync
-    pub players: HashSet<std::net::SocketAddr>, // 이 필드 추가
-    pub processor: crate::game_cache::GameDataProcessor, // GameDataProcessor 추가
+    pub game_status: u8, // 0=Waiting, 1=Playing, 2=Netsync
+    pub players: HashSet<std::net::SocketAddr>,
+    // New: GameSyncManager for frame synchronization
+    pub sync_manager: Option<crate::game_sync::GameSyncManager>,
+    // Player addresses in order (indexed by player_id)
+    pub player_addrs: Vec<std::net::SocketAddr>,
+    // Player delays (indexed by player_id)
+    pub player_delays: Vec<usize>,
 }
