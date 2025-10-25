@@ -2,8 +2,8 @@ name: Rust
 
 on:
   push:
-    branches:    
-      - '**' 
+    branches:
+      - "**"
 env:
   CARGO_TERM_COLOR: always
 
@@ -11,6 +11,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Build
-      run: cargo check
+      - uses: actions/checkout@v3
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - name: Build
+        run: cargo check
