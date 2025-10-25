@@ -65,6 +65,10 @@ pub async fn handle_create_game(
     let status_data = util::make_update_game_status(&game_info)?;
     util::broadcast_packet(&state, 0x0E, status_data).await?;
 
+    // Send player information (empty list for the creator)
+    let players_info = util::make_player_information(src, &state, &game_info).await?;
+    util::send_packet(&state, src, 0x0D, players_info).await?;
+
     // Build and send join game response
     let response_data = {
         let client_info = state.get_client(src).await.ok_or("Client not found")?;

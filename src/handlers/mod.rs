@@ -1,5 +1,6 @@
 pub mod create_game;
 pub mod data;
+pub mod drop_game;
 pub mod game_chat;
 pub mod global_chat;
 pub mod handlerf;

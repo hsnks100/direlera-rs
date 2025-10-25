@@ -35,6 +35,7 @@ pub async fn handle_message(
             handle_game_data(message, src, state).await?;
         }
         0x13 => handle_game_cache(message, src, state).await?,
+        0x14 => drop_game::handle_drop_game(message, src, state).await?,
         0x15 => handle_ready_to_play_signal(message, src, state).await?,
 
         _ => {

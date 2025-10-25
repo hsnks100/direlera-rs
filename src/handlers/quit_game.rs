@@ -52,6 +52,13 @@ pub async fn handle_quit_game(
         (client_info.username.clone(), client_info.user_id, game_id)
     };
 
+    // If game is in playing state, drop game first for all players
+    println!(
+        "[QuitGame] Checking if game {} is in playing state",
+        game_id
+    );
+    drop_game::execute_drop_game(game_id, src, &state).await?;
+
     // Update game info
     let game_info_clone = {
         let mut games_lock = state.games.write().await;
@@ -64,12 +71,35 @@ pub async fn handle_quit_game(
         };
         game_info.players.remove(src);
         game_info.num_players -= 1;
+
+        // Remove from player_addrs and player_delays
+        if let Some(idx) = game_info.player_addrs.iter().position(|addr| addr == src) {
+            game_info.player_addrs.remove(idx);
+            game_info.player_delays.remove(idx);
+        }
+
         game_info.clone()
     };
+
+    // Remove client from game
+    util::with_client_mut(&state, src, |client_info| {
+        client_info.game_id = None;
+        client_info.player_status = PLAYER_STATUS_IDLE;
+    })
+    .await?;
 
     if game_info_clone.owner == username {
         // Close the game - Remove game from games list
         state.remove_game(game_info_clone.game_id).await;
+
+        // Update remaining players' status
+        for player_addr in game_info_clone.players.iter() {
+            util::with_client_mut(&state, player_addr, |client_info| {
+                client_info.game_id = None;
+                client_info.player_status = PLAYER_STATUS_IDLE;
+            })
+            .await?;
+        }
 
         // Make close game notification
         let mut data = BytesMut::new();

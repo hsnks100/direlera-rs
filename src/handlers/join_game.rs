@@ -29,10 +29,17 @@ pub async fn handle_join_game(
     .await?;
 
     util::with_game_mut(&state, src, |game_info| {
-        game_info.players.insert(*src);
-        game_info.num_players += 1;
-        game_info.player_addrs.push(*src);
-        game_info.player_delays.push(conn_type as usize); // Use player's connection_type as delay
+        // Only add if not already in the game (prevents duplicates)
+        if game_info.players.insert(*src) {
+            game_info.num_players += 1;
+            game_info.player_addrs.push(*src);
+            game_info.player_delays.push(conn_type as usize);
+        } else {
+            println!(
+                "[JoinGame] Player {} already in game, skipping duplicate",
+                src
+            );
+        }
     })
     .await?;
 
@@ -58,12 +65,11 @@ pub async fn handle_join_game(
         util::build_join_game_response(&client_info)
     };
 
-    // Send join game response to existing players
+    // Send join game notification to ALL players (including the joining player)
+    // Each player manages their own list, so we send the new player info (0x0C) to everyone
     let game_players = game_info.players.clone();
     for player_addr in game_players {
-        if &player_addr != src {
-            util::send_packet(&state, &player_addr, 0x0C, response_data.clone()).await?;
-        }
+        util::send_packet(&state, &player_addr, 0x0C, response_data.clone()).await?;
     }
 
     Ok(())
