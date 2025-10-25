@@ -141,18 +141,23 @@ impl PlayerSendQueue {
 
     /// Extract the required amount of data from all player buffers
     /// Returns combined data if ready, None otherwise
+    /// Data is interleaved frame-by-frame: [Frame1: P0 P1...][Frame2: P0 P1...]
     fn extract_combined(&mut self) -> Option<Vec<u8>> {
         if !self.can_send() {
             return None;
         }
 
-        let bytes_to_extract = self.delay * self.bytes_per_frame;
-        let mut combined = Vec::with_capacity(bytes_to_extract * self.player_buffers.len());
+        let bytes_per_player_per_frame = self.bytes_per_frame;
+        let total_bytes = self.delay * self.bytes_per_frame * self.player_buffers.len();
+        let mut combined = Vec::with_capacity(total_bytes);
 
-        for buffer in &mut self.player_buffers {
-            for _ in 0..bytes_to_extract {
-                if let Some(byte) = buffer.pop_front() {
-                    combined.push(byte);
+        // Extract frame-by-frame, interleaving players within each frame
+        for _frame in 0..self.delay {
+            for buffer in &mut self.player_buffers {
+                for _ in 0..bytes_per_player_per_frame {
+                    if let Some(byte) = buffer.pop_front() {
+                        combined.push(byte);
+                    }
                 }
             }
         }
@@ -501,10 +506,10 @@ mod tests {
             _ => panic!("P0 should get GameData"),
         }
 
-        // P1's frame [01 00 02 00 00 00 AA BB]
+        // P1's frame (frame-interleaved): [Frame1: 01 00 00 00][Frame2: 02 00 AA BB]
         match &p1_outputs[0].response {
             ServerResponse::GameData(data) => {
-                assert_eq!(data, &vec![0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0xAA, 0xBB]);
+                assert_eq!(data, &vec![0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0xAA, 0xBB]);
             }
             _ => panic!("P1 should get GameData"),
         }
@@ -718,17 +723,17 @@ mod tests {
         assert_eq!(outputs.len(), 2);
 
         // Both should receive GameData (first time receiving)
-        // Combined: [AA BB AA BB CC DD CC DD] (4 bytes from each player)
+        // Combined (frame-interleaved): [Frame1: AA BB CC DD][Frame2: AA BB CC DD]
         match &outputs[0].response {
             ServerResponse::GameData(data) => {
                 assert_eq!(data.len(), 8); // 4 bytes from P0 + 4 bytes from P1
-                assert_eq!(data, &vec![0xAA, 0xBB, 0xAA, 0xBB, 0xCC, 0xDD, 0xCC, 0xDD]);
+                assert_eq!(data, &vec![0xAA, 0xBB, 0xCC, 0xDD, 0xAA, 0xBB, 0xCC, 0xDD]);
             }
             _ => panic!("P0 should get GameData"),
         }
         match &outputs[1].response {
             ServerResponse::GameData(data) => {
-                assert_eq!(data, &vec![0xAA, 0xBB, 0xAA, 0xBB, 0xCC, 0xDD, 0xCC, 0xDD]);
+                assert_eq!(data, &vec![0xAA, 0xBB, 0xCC, 0xDD, 0xAA, 0xBB, 0xCC, 0xDD]);
             }
             _ => panic!("P1 should get GameData"),
         }
@@ -750,16 +755,16 @@ mod tests {
         // Both should receive GameData (new combined data)
         assert_eq!(outputs.len(), 2);
 
-        // Combined: [11 22 11 22 33 44 33 44]
+        // Combined (frame-interleaved): [Frame1: 11 22 33 44][Frame2: 11 22 33 44]
         match &outputs[0].response {
             ServerResponse::GameData(data) => {
-                assert_eq!(data, &vec![0x11, 0x22, 0x11, 0x22, 0x33, 0x44, 0x33, 0x44]);
+                assert_eq!(data, &vec![0x11, 0x22, 0x33, 0x44, 0x11, 0x22, 0x33, 0x44]);
             }
             _ => panic!("P0 should get GameData"),
         }
         match &outputs[1].response {
             ServerResponse::GameData(data) => {
-                assert_eq!(data, &vec![0x11, 0x22, 0x11, 0x22, 0x33, 0x44, 0x33, 0x44]);
+                assert_eq!(data, &vec![0x11, 0x22, 0x33, 0x44, 0x11, 0x22, 0x33, 0x44]);
             }
             _ => panic!("P1 should get GameData"),
         }
@@ -988,11 +993,10 @@ mod tests {
         // Both players should receive output
         assert_eq!(outputs.len(), 2);
 
-        // Combined output should be: [AA BB CC DD 11 22 33 44]
-        // P0's 4 bytes + P1's 4 bytes
+        // Combined output (frame-interleaved): [Frame1: AA BB 11 22][Frame2: CC DD 33 44]
         match &outputs[0].response {
             ServerResponse::GameData(data) => {
-                assert_eq!(data, &vec![0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44]);
+                assert_eq!(data, &vec![0xAA, 0xBB, 0x11, 0x22, 0xCC, 0xDD, 0x33, 0x44]);
             }
             _ => panic!("Should get GameData"),
         }
