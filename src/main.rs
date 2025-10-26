@@ -11,7 +11,6 @@ mod packet_util;
 mod handlers;
 use handlers::*;
 
-mod game_cache;
 mod game_sync;
 mod simple_game_sync;
 use handlers::data::*;

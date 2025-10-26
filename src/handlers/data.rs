@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     net::SocketAddr,
     sync::atomic::{AtomicU16, AtomicU32, Ordering},
     sync::Arc,
@@ -146,48 +146,8 @@ pub struct ClientInfo {
     pub last_ping_time: Option<Instant>,
     pub ack_count: u16,
     //////////////////
-    /// Cache for received data (client's send cache).
-    pub receive_cache: crate::game_cache::GameCache,
-    /// Queue of pending inputs.
-    pub pending_inputs: VecDeque<Vec<u8>>,
     /// Packet generator for this client (handles sequence numbers and redundancy)
     pub packet_generator: crate::kaillera::protocol::UDPPacketGenerator,
-}
-
-impl ClientInfo {
-    /// Adds an input to the pending inputs queue.
-    #[allow(dead_code)]
-    fn add_input(&mut self, data: Vec<u8>) {
-        self.pending_inputs.push_back(data);
-    }
-
-    /// Retrieves and removes the next input from the pending queue.
-    #[allow(dead_code)]
-    fn get_next_input(&mut self) -> Option<Vec<u8>> {
-        self.pending_inputs.pop_front()
-    }
-}
-
-impl crate::game_cache::ClientTrait for ClientInfo {
-    fn id(&self) -> u32 {
-        self.user_id as u32
-    }
-
-    fn get_receive_cache(&mut self) -> &mut crate::game_cache::GameCache {
-        &mut self.receive_cache
-    }
-
-    fn add_input(&mut self, data: Vec<u8>) {
-        self.pending_inputs.push_back(data);
-    }
-
-    fn has_pending_input(&self) -> bool {
-        !self.pending_inputs.is_empty()
-    }
-
-    fn get_next_input(&mut self) -> Option<Vec<u8>> {
-        self.get_next_input()
-    }
 }
 
 #[derive(Debug, Clone)]

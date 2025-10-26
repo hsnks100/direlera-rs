@@ -1,5 +1,4 @@
 use bytes::{Buf, BufMut, BytesMut};
-use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::Arc;
 use std::time::Instant;
@@ -41,8 +40,6 @@ pub async fn handle_user_login(
         game_id: None,
         last_ping_time: Some(Instant::now()),
         ack_count: 0,
-        receive_cache: game_cache::GameCache::new(),
-        pending_inputs: VecDeque::new(),
         packet_generator: kaillera::protocol::UDPPacketGenerator::new(),
     };
 
