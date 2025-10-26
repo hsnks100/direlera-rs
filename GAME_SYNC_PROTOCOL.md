@@ -1,6 +1,8 @@
 # Kaillera Game Synchronization Protocol
 
-This document describes the Kaillera protocol's game synchronization mechanism using Game Data (0x12) and Game Cache (0x13) packets.
+This document describes the **actual behavior** of the Kaillera protocol's game synchronization mechanism, discovered through reverse engineering and packet analysis.
+
+The original protocol documentation only provided basic packet formats without explaining critical details like per-player caching, frame interleaving, or multi-delay synchronization. These mechanisms were discovered by analyzing real Kaillera server traffic with Wireshark.
 
 ## Table of Contents
 
