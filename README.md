@@ -1,6 +1,6 @@
-# Direlera-rs
+# direlera-rs
 
-**Direlera-rs** is a Rust-based server that uses the Kaillera protocol to facilitate online multiplayer for emulators.
+**direlera-rs** is a Rust-based server that uses the Kaillera protocol to facilitate online multiplayer for emulators.
 
 > ⚠️ **Experimental Project**: This is an early-stage experimental project. Stability and user experience have not been thoroughly tested or optimized yet. Use at your own risk.
 
@@ -118,6 +118,18 @@ The included Wireshark dissector allows you to analyze Kaillera protocol packets
 
    - Start capturing on UDP ports 27888 and 8080
    - Use filter: `kaillera` to display only Kaillera packets
+
+## How It Works
+
+For a detailed explanation of the Kaillera game synchronization protocol, including:
+
+- Game Data (0x12) and Game Cache (0x13) packet behavior
+- Per-player caching mechanisms
+- Frame synchronization with mixed connection types
+- Frame interleaving algorithm
+- Preemptive padding for multi-delay synchronization
+
+See **[GAME_SYNC_PROTOCOL.md](GAME_SYNC_PROTOCOL.md)** - This document describes the actual protocol behavior discovered through reverse engineering and packet analysis with Wireshark.
 
 ## Contributing
 
