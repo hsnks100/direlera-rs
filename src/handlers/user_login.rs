@@ -6,6 +6,7 @@ use tracing::info;
 use util::read_string;
 use uuid::Uuid;
 
+use crate::kaillera::message_types as msg;
 use crate::*;
 
 pub async fn handle_user_login(
@@ -59,7 +60,7 @@ pub async fn handle_user_login(
     data.put_u32_le(3);
 
     // Send response
-    util::send_packet(&state, src, 0x05, data.to_vec()).await?;
+    util::send_packet(&state, src, msg::SERVER_TO_CLIENT_ACK, data.to_vec()).await?;
 
     Ok(())
 }

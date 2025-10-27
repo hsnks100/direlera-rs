@@ -3,6 +3,7 @@ use std::error::Error;
 use std::sync::Arc;
 use tracing::{debug, info};
 
+use crate::kaillera::message_types as msg;
 use crate::*;
 /*
 '            Server Notification:
@@ -29,24 +30,16 @@ pub async fn handle_user_quit(
 
     // Remove client from list
     if let Some(client_info) = state.remove_client(src).await {
-        info!(
-            { fields::USER_NAME } = client_info.username.as_str(),
-            { fields::USER_ID } = client_info.user_id,
-            quit_message = user_message.as_str(),
-            "User quit"
-        );
+        info!("User quit: {}", user_message);
         let mut data = BytesMut::new();
         data.put(client_info.username.as_bytes());
         data.put_u8(0);
         data.put_u16_le(client_info.user_id);
         data.put(user_message.as_bytes());
         data.put_u8(0);
-        util::broadcast_packet(&state, 0x01, data.to_vec()).await?;
+        util::broadcast_packet(&state, msg::USER_QUIT, data.to_vec()).await?;
     } else {
-        debug!(
-            quit_message = user_message.as_str(),
-            "Unknown client quit"
-        );
+        debug!(quit_message = user_message.as_str(), "Unknown client quit");
     }
     Ok(())
 }

@@ -3,7 +3,7 @@ use std::error::Error;
 use bytes::{Buf, BufMut, BytesMut};
 use tracing::debug;
 
-use crate::{fields, GameInfo, Message};
+use crate::{GameInfo, Message};
 
 use super::data::{AppState, ClientInfo};
 
@@ -55,7 +55,7 @@ pub async fn make_player_information(
     data.put_u32_le((game_info.players.len() - 1) as u32);
 
     debug!(
-        { fields::PLAYER_COUNT } = game_info.players.len(),
+        PLAYER_COUNT = game_info.players.len(),
         "Building player information"
     );
 

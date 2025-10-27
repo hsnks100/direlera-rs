@@ -4,6 +4,8 @@ use std::error::Error;
 use std::sync::Arc;
 use tracing::info;
 
+use crate::kaillera::message_types as msg;
+
 pub async fn handle_global_chat(
     message: kaillera::protocol::ParsedMessage,
     src: &std::net::SocketAddr,
@@ -23,11 +25,7 @@ pub async fn handle_global_chat(
         "Unknown".to_string()
     };
 
-    info!(
-        { fields::USER_NAME } = username.as_str(),
-        { fields::CHAT_MESSAGE } = chat_message.as_str(),
-        "Global chat message"
-    );
+    info!("Global chat message: {}", chat_message);
 
     // Server notification creation
     let mut data = BytesMut::new();
@@ -37,7 +35,7 @@ pub async fn handle_global_chat(
     data.put_u8(0); // NULL terminator
 
     // Send message to all clients
-    util::broadcast_packet(&state, 0x07, data.to_vec()).await?;
+    util::broadcast_packet(&state, msg::GLOBAL_CHAT, data.to_vec()).await?;
 
     Ok(())
 }

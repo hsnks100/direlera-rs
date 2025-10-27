@@ -5,6 +5,8 @@ use std::error::Error;
 use std::sync::Arc;
 use tracing::info;
 
+use crate::kaillera::message_types as msg;
+
 // Refactored handle_create_game function
 pub async fn handle_create_game(
     message: kaillera::protocol::ParsedMessage,
@@ -62,22 +64,22 @@ pub async fn handle_create_game(
     let data = util::build_new_game_notification(&username, &game_name, &emulator_name, game_id);
 
     // Broadcast new game notification to all clients
-    util::broadcast_packet(&state, 0x0A, data).await?;
+    util::broadcast_packet(&state, msg::CREATE_GAME, data).await?;
 
     // Send game status update to the client
     let status_data = util::make_update_game_status(&game_info)?;
-    util::broadcast_packet(&state, 0x0E, status_data).await?;
+    util::broadcast_packet(&state, msg::UPDATE_GAME_STATUS, status_data).await?;
 
     // Send player information (empty list for the creator)
     let players_info = util::make_player_information(src, &state, &game_info).await?;
-    util::send_packet(&state, src, 0x0D, players_info).await?;
+    util::send_packet(&state, src, msg::PLAYER_INFORMATION, players_info).await?;
 
     // Build and send join game response
     let response_data = {
         let client_info = state.get_client(src).await.ok_or("Client not found")?;
         util::build_join_game_response(&client_info)
     };
-    util::send_packet(&state, src, 0x0C, response_data).await?;
+    util::send_packet(&state, src, msg::JOIN_GAME, response_data).await?;
 
     Ok(())
 }

@@ -3,6 +3,7 @@ use std::error::Error;
 use std::sync::Arc;
 use tracing::{debug, info};
 
+use crate::kaillera::message_types as msg;
 use crate::*;
 
 /*
@@ -151,7 +152,7 @@ pub async fn execute_drop_game(
     notification_data.put_u8(dropper_player_num);
 
     for player_addr in &game_players {
-        util::send_packet(state, player_addr, 0x14, notification_data.to_vec()).await?;
+        util::send_packet(state, player_addr, msg::DROP_GAME, notification_data.to_vec()).await?;
     }
 
     info!(
@@ -164,7 +165,7 @@ pub async fn execute_drop_game(
     // Update game status for all clients AFTER drop notification
     let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
     let status_data = util::make_update_game_status(&game_info)?;
-    util::broadcast_packet(state, 0x0E, status_data).await?;
+    util::broadcast_packet(state, msg::UPDATE_GAME_STATUS, status_data).await?;
 
     info!(
         { fields::GAME_ID } = game_id,
