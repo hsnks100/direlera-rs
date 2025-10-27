@@ -2,6 +2,7 @@ use crate::*;
 use bytes::{BufMut, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
+use tracing::info;
 
 pub async fn handle_global_chat(
     message: kaillera::protocol::ParsedMessage,
@@ -22,9 +23,10 @@ pub async fn handle_global_chat(
         "Unknown".to_string()
     };
 
-    println!(
-        "Global chat: username='{}', message='{}'",
-        username, chat_message
+    info!(
+        { fields::USER_NAME } = username.as_str(),
+        { fields::CHAT_MESSAGE } = chat_message.as_str(),
+        "Global chat message"
     );
 
     // Server notification creation

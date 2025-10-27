@@ -2,6 +2,7 @@ use crate::*;
 use bytes::{Buf, BufMut, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
+use tracing::{debug, info};
 
 use crate::simple_game_sync;
 /*
@@ -32,10 +33,14 @@ pub async fn handle_start_game(
     src: &std::net::SocketAddr,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
-    println!("Start Game");
     let mut buf = BytesMut::from(&message.data[..]);
     let _ = util::read_string(&mut buf); // Empty String
     let _ = buf.get_u32_le(); // 0xFFFF 0xFF 0xFF
+
+    let game_id = {
+        let client = state.get_client(src).await.ok_or("Client not found")?;
+        client.game_id.ok_or("Client not in a game")?
+    };
 
     // Initialize SimpleGameSync when game starts
     util::with_game_mut(&state, src, |game_info| {
@@ -46,15 +51,17 @@ pub async fn handle_start_game(
         game_info.sync_manager = Some(simple_game_sync::SimpleGameSync::new_without_padding(
             delays,
         ));
-
-        println!(
-            "[StartGame] Initialized SimpleGameSync with {} players",
-            game_info.player_addrs.len()
-        );
     })
     .await?;
 
     let game_info = util::fetch_game_info(src, &state).await?;
+
+    info!(
+        { fields::GAME_ID } = game_id,
+        { fields::PLAYER_COUNT } = game_info.player_addrs.len(),
+        { fields::GAME_STATUS } = "playing",
+        "Game started"
+    );
 
     // Update game status
     let status_data = util::make_update_game_status(&game_info)?;
@@ -66,9 +73,11 @@ pub async fn handle_start_game(
         let mut data = BytesMut::new();
         data.put_u8(0);
         data.put_u16_le(player_delay as u16); // Frame Delay (player's connection_type)
-        println!(
-            "Sending StartGame to Player {} with FrameDelay={}",
-            i, player_delay
+        debug!(
+            player_number = i + 1,
+            frame_delay = player_delay,
+            { fields::ADDR } = %player_addr,
+            "Sending start game notification"
         );
         data.put_u8((i + 1) as u8); // Player Number (1-indexed)
         data.put_u8(game_info.player_addrs.len() as u8); // Total Players

@@ -1,6 +1,7 @@
 use bytes::{Buf, BufMut, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
+use tracing::{error, info};
 
 use crate::*;
 /*
@@ -33,7 +34,10 @@ pub async fn handle_kick_user(
         match client_info {
             Some((addr, client_info)) => (client_info.username.clone(), client_info.user_id, *addr),
             None => {
-                eprintln!("Client not found during kick user: user_id={}", user_id);
+                error!(
+                    { fields::KICKED_USER_ID } = user_id,
+                    "Client not found during kick user"
+                );
                 return Ok(());
             }
         }
@@ -45,15 +49,18 @@ pub async fn handle_kick_user(
             Some(client_info) => match client_info.game_id {
                 Some(game_id) => game_id,
                 None => {
-                    eprintln!(
-                        "Game ID not found during kick user: user_id={}",
-                        client_user_id
+                    error!(
+                        { fields::USER_ID } = client_user_id,
+                        "Game ID not found during kick user"
                     );
                     return Ok(());
                 }
             },
             None => {
-                eprintln!("Client not found during kick user: user_id={}", user_id);
+                error!(
+                    { fields::KICKED_USER_ID } = user_id,
+                    "Client not found during kick user"
+                );
                 return Ok(());
             }
         }
@@ -69,11 +76,21 @@ pub async fn handle_kick_user(
                 game_info.clone()
             }
             None => {
-                eprintln!("Game not found during kick user: game_id={}", game_id,);
+                error!(
+                    { fields::GAME_ID } = game_id,
+                    "Game not found during kick user"
+                );
                 return Ok(());
             }
         }
     };
+
+    info!(
+        { fields::USER_NAME } = username.as_str(),
+        { fields::USER_ID } = client_user_id,
+        { fields::GAME_ID } = game_id,
+        "User kicked from game"
+    );
 
     // Update game status
     let status_data = util::make_update_game_status(&game_info_clone)?;

@@ -1,8 +1,9 @@
 use std::error::Error;
 
 use bytes::{Buf, BufMut, BytesMut};
+use tracing::debug;
 
-use crate::{GameInfo, Message};
+use crate::{fields, GameInfo, Message};
 
 use super::data::{AppState, ClientInfo};
 
@@ -52,7 +53,11 @@ pub async fn make_player_information(
     let mut data = BytesMut::new();
     data.put_u8(0); // Empty string [00]
     data.put_u32_le((game_info.players.len() - 1) as u32);
-    println!("Player count: {}", game_info.players.len());
+
+    debug!(
+        { fields::PLAYER_COUNT } = game_info.players.len(),
+        "Building player information"
+    );
 
     for player_addr in game_info.players.iter() {
         if player_addr != src {

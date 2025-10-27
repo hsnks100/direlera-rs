@@ -3,6 +3,7 @@ use bytes::{Buf, BytesMut};
 use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Arc;
+use tracing::info;
 
 // Refactored handle_create_game function
 pub async fn handle_create_game(
@@ -10,7 +11,6 @@ pub async fn handle_create_game(
     src: &std::net::SocketAddr,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
-    println!("Create Game");
     // Parse the message to extract game_name
     let mut buf = BytesMut::from(&message.data[..]);
     let _ = util::read_string(&mut buf); // Empty String
@@ -50,9 +50,12 @@ pub async fn handle_create_game(
     })
     .await?;
 
-    println!(
-        "Game created: '{}', Game ID: {}, Game Name: '{}'",
-        username, game_id, game_name
+    info!(
+        { fields::GAME_ID } = game_id,
+        { fields::GAME_NAME } = game_name.as_str(),
+        { fields::USER_NAME } = username.as_str(),
+        emulator = emulator_name.as_str(),
+        "Game created"
     );
 
     // Build data for new game notification

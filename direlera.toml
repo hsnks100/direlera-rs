@@ -1,15 +1,11 @@
-main_port = 27888
-sub_port = 27999
-debug = false
-random_ping = false
-priority = 32
-key = "189rjfadoisfj8923fjio"
-notice = """
-This is a notice, and can be written on multiple lines.
-First of all, EUC_KR Korean encoding is supported.
-1
-2
-3
-4
-한글은?
-"""
+main_port = 8080
+control_port = 27888
+
+# Tracing configuration
+# Format options: "pretty", "compact", "json"
+# - pretty: human-readable multi-line format (best for development)
+# - compact: single-line format (default)
+# - json: structured JSON format (best for production/log aggregation)
+[tracing]
+format = "pretty"
+level = "info"    # Options: "trace", "debug", "info", "warn", "error"

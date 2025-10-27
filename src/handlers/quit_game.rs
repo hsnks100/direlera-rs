@@ -1,6 +1,7 @@
 use bytes::{BufMut, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
+use tracing::{error, info};
 
 use crate::*;
 /*
@@ -38,14 +39,20 @@ pub async fn handle_quit_game(
         let client_info = match state.get_client(src).await {
             Some(client_info) => client_info,
             None => {
-                eprintln!("Client not found during game quit: addr={}", src);
+                error!(
+                    { fields::ADDR } = %src,
+                    "Client not found during game quit"
+                );
                 return Ok(());
             }
         };
         let game_id = match client_info.game_id {
             Some(game_id) => game_id,
             None => {
-                eprintln!("Game ID not found during game quit: addr={}", src);
+                error!(
+                    { fields::ADDR } = %src,
+                    "Game ID not found during game quit"
+                );
                 return Ok(());
             }
         };
@@ -53,9 +60,10 @@ pub async fn handle_quit_game(
     };
 
     // If game is in playing state, drop game first for all players
-    println!(
-        "[QuitGame] Checking if game {} is in playing state",
-        game_id
+    info!(
+        { fields::GAME_ID } = game_id,
+        { fields::USER_NAME } = username.as_str(),
+        "Checking if game is in playing state before quit"
     );
     drop_game::execute_drop_game(game_id, src, &state).await?;
 
@@ -65,7 +73,10 @@ pub async fn handle_quit_game(
         let game_info = match games_lock.get_mut(&game_id) {
             Some(game_info) => game_info,
             None => {
-                eprintln!("Game not found during game quit: game_id={}", game_id);
+                error!(
+                    { fields::GAME_ID } = game_id,
+                    "Game not found during game quit"
+                );
                 return Ok(());
             }
         };
@@ -90,6 +101,11 @@ pub async fn handle_quit_game(
 
     if game_info_clone.owner == username {
         // Close the game - Remove game from games list
+        info!(
+            { fields::GAME_ID } = game_info_clone.game_id,
+            { fields::USER_NAME } = username.as_str(),
+            "Owner quit - closing game"
+        );
         state.remove_game(game_info_clone.game_id).await;
 
         // Update remaining players' status
@@ -116,6 +132,13 @@ pub async fn handle_quit_game(
             util::send_packet(&state, player_addr, 0x0B, data.to_vec()).await?;
         }
     } else {
+        info!(
+            { fields::GAME_ID } = game_info_clone.game_id,
+            { fields::USER_NAME } = username.as_str(),
+            { fields::PLAYER_COUNT } = game_info_clone.num_players,
+            "Player quit game"
+        );
+        
         // Update game status
         let status_data = util::make_update_game_status(&game_info_clone)?;
         util::broadcast_packet(&state, 0x0E, status_data).await?;

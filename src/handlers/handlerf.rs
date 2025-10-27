@@ -1,8 +1,8 @@
 use bytes::{Buf, BufMut, BytesMut};
-use chrono::Local;
 use std::error::Error;
 use std::sync::Arc;
 use std::time::Instant;
+use tracing::{debug, info, warn};
 
 use crate::simple_game_sync;
 use crate::*;
@@ -29,9 +29,9 @@ pub async fn handle_message(
         }
         0x11 => start_game::handle_start_game(message, src, state).await?,
         0x12 => {
-            println!(
-                "[{}] Received 0x12: Game Sync Request",
-                Local::now().format("%Y-%m-%d %H:%M:%S%.3f")
+            debug!(
+                { fields::MESSAGE_TYPE } = "game_data",
+                "Game sync request received"
             );
             handle_game_data(message, src, state).await?;
         }
@@ -40,8 +40,10 @@ pub async fn handle_message(
         0x15 => handle_ready_to_play_signal(message, src, state).await?,
 
         _ => {
-            println!("Unknown message type: 0x{:02X}", message.message_type);
-            // Err("Unknown message type".to_string())?
+            warn!(
+                { fields::MESSAGE_TYPE } = format!("0x{:02X}", message.message_type),
+                "Unknown message type received"
+            );
         }
     }
     Ok(())
@@ -101,7 +103,7 @@ pub async fn handle_ready_to_play_signal(
     src: &std::net::SocketAddr,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
-    println!("Ready to play signal");
+    debug!("Ready to play signal received");
     let mut buf = BytesMut::from(&message.data[..]);
     let _ = buf.get_u8(); // Empty String
 
@@ -128,11 +130,18 @@ pub async fn handle_ready_to_play_signal(
         let all_ready = game_info_clone.players.iter().all(|player_addr| {
             if let Some(session_id) = addr_map.get(player_addr) {
                 if let Some(client_info) = id_map.get(session_id) {
-                    println!("client_info.player_status: {}", client_info.player_status);
+                    debug!(
+                        { fields::ADDR } = %player_addr,
+                        player_status = client_info.player_status,
+                        "Checking player status"
+                    );
                     return client_info.player_status == PLAYER_STATUS_NET_SYNC;
                 }
             }
-            println!("None client_info");
+            debug!(
+                { fields::ADDR } = %player_addr,
+                "Client info not found"
+            );
             false
         });
         all_ready
@@ -150,18 +159,18 @@ pub async fn handle_ready_to_play_signal(
         }
     }
 
-    println!("12");
     // Send ready to play signal notification
     if all_user_ready_to_signal {
-        println!("all user ready to signal");
+        info!(
+            { fields::PLAYER_COUNT } = game_info_clone.players.len(),
+            "All users ready to signal - starting game"
+        );
         for player_addr in game_info_clone.players.iter() {
             let mut data = BytesMut::new();
             data.put_u8(0);
             util::send_packet(&state, player_addr, 0x15, data.to_vec()).await?;
         }
-        println!("13");
     }
-    println!("14");
     Ok(())
 }
 
@@ -175,7 +184,7 @@ pub async fn handle_game_data(
     src: &std::net::SocketAddr,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
-    println!("[0x12] Game Data from {:?}", src);
+    debug!("Game data received");
     let mut buf = BytesMut::from(&message.data[..]);
     let _ = buf.get_u8(); // Empty String
     let data_length = buf.get_u16_le() as usize;
@@ -192,7 +201,11 @@ pub async fn handle_game_data(
         .position(|addr| addr == src)
         .ok_or("Player not in game")?;
 
-    println!("[0x12] Player {} sent {} bytes", player_id, game_data.len());
+    debug!(
+        { fields::PLAYER_ID } = player_id,
+        { fields::DATA_LENGTH } = game_data.len(),
+        "Player sent game data"
+    );
 
     // Process with SimpleGameSync
     let outputs = {
@@ -226,11 +239,11 @@ pub async fn handle_game_data(
             simple_game_sync::ServerResponse::GameCache(position) => (0x13, vec![0x00, position]),
         };
 
-        println!(
-            "[→ P{}] 0x{:02X} with {} bytes",
-            output.player_id,
-            message_type,
-            data_to_send.len()
+        debug!(
+            { fields::PLAYER_ID } = output.player_id,
+            { fields::MESSAGE_TYPE } = format!("0x{:02X}", message_type),
+            { fields::DATA_LENGTH } = data_to_send.len(),
+            "Sending game data to player"
         );
         util::send_packet(&state, target_addr, message_type, data_to_send).await?;
     }
@@ -243,7 +256,7 @@ pub async fn handle_game_cache(
     src: &std::net::SocketAddr,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
-    println!("[0x13] Game Cache from {:?}", src);
+    debug!("Game cache received");
     let mut buf = BytesMut::from(&message.data[..]);
     let _ = buf.get_u8(); // Empty String
     let cache_position = buf.get_u8();
@@ -259,9 +272,10 @@ pub async fn handle_game_cache(
         .position(|addr| addr == src)
         .ok_or("Player not in game")?;
 
-    println!(
-        "[0x13] Player {} sent cache position {}",
-        player_id, cache_position
+    debug!(
+        { fields::PLAYER_ID } = player_id,
+        { fields::CACHE_POSITION } = cache_position,
+        "Player sent cache position"
     );
 
     // Process with SimpleGameSync
@@ -296,11 +310,11 @@ pub async fn handle_game_cache(
             simple_game_sync::ServerResponse::GameCache(position) => (0x13, vec![0x00, position]),
         };
 
-        println!(
-            "[→ P{}] 0x{:02X} cache_pos or {} bytes",
-            output.player_id,
-            message_type,
-            data_to_send.len()
+        debug!(
+            { fields::PLAYER_ID } = output.player_id,
+            { fields::MESSAGE_TYPE } = format!("0x{:02X}", message_type),
+            { fields::DATA_LENGTH } = data_to_send.len(),
+            "Sending cache data to player"
         );
         util::send_packet(&state, target_addr, message_type, data_to_send).await?;
     }
