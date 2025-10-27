@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
+use crate::kaillera::message_types as msg;
 use crate::simple_game_sync;
 use crate::*;
 
@@ -13,35 +14,35 @@ pub async fn handle_message(
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
     match message.message_type {
-        0x01 => user_quit::handle_user_quit(message, src, state).await?,
-        0x03 => user_login::handle_user_login(message, src, state).await?,
-        // 0x04 => handle_server_status(src, state).await, // Corrected line
-        // 0x05 => handle_server_to_client_ack(message, src, state).await,
-        0x06 => handle_client_to_server_ack(src, state).await?,
-        0x07 => global_chat::handle_global_chat(message, src, state).await?,
-        0x08 => game_chat::handle_game_chat(message, src, state).await?,
-        0x09 => handle_client_keep_alive(message, src).await?,
-        0x0A => create_game::handle_create_game(message, src, state).await?,
-        0x0B => handlers::quit_game::handle_quit_game(message.data, src, state).await?,
-        0x0C => join_game::handle_join_game(message, src, state).await?,
-        0x0F => {
+        msg::USER_QUIT => user_quit::handle_user_quit(message, src, state).await?,
+        msg::USER_LOGIN => user_login::handle_user_login(message, src, state).await?,
+        // msg::SERVER_STATUS => handle_server_status(src, state).await?,
+        // msg::SERVER_TO_CLIENT_ACK => handle_server_to_client_ack(message, src, state).await?,
+        msg::CLIENT_TO_SERVER_ACK => handle_client_to_server_ack(src, state).await?,
+        msg::GLOBAL_CHAT => global_chat::handle_global_chat(message, src, state).await?,
+        msg::GAME_CHAT => game_chat::handle_game_chat(message, src, state).await?,
+        msg::CLIENT_KEEP_ALIVE => handle_client_keep_alive(message, src).await?,
+        msg::CREATE_GAME => create_game::handle_create_game(message, src, state).await?,
+        msg::QUIT_GAME => handlers::quit_game::handle_quit_game(message.data, src, state).await?,
+        msg::JOIN_GAME => join_game::handle_join_game(message, src, state).await?,
+        msg::KICK_USER => {
             kick_user::handle_kick_user(message, src, state).await?;
         }
-        0x11 => start_game::handle_start_game(message, src, state).await?,
-        0x12 => {
+        msg::START_GAME => start_game::handle_start_game(message, src, state).await?,
+        msg::GAME_DATA => {
             debug!(
-                { fields::MESSAGE_TYPE } = "game_data",
+                message_type = msg::message_type_name(message.message_type),
                 "Game sync request received"
             );
             handle_game_data(message, src, state).await?;
         }
-        0x13 => handle_game_cache(message, src, state).await?,
-        0x14 => drop_game::handle_drop_game(message, src, state).await?,
-        0x15 => handle_ready_to_play_signal(message, src, state).await?,
+        msg::GAME_CACHE => handle_game_cache(message, src, state).await?,
+        msg::DROP_GAME => drop_game::handle_drop_game(message, src, state).await?,
+        msg::READY_TO_PLAY => handle_ready_to_play_signal(message, src, state).await?,
 
         _ => {
             warn!(
-                { fields::MESSAGE_TYPE } = format!("0x{:02X}", message.message_type),
+                message_type = msg::message_type_name(message.message_type),
                 "Unknown message type received"
             );
         }
@@ -69,13 +70,13 @@ pub async fn handle_client_to_server_ack(
 
     if ack_count >= 3 {
         let data = util::make_server_status(src, &state).await?;
-        util::send_packet(&state, src, 0x04, data).await?;
+        util::send_packet(&state, src, msg::SERVER_STATUS, data).await?;
 
         let data = util::make_user_joined(src, &state).await?;
-        util::broadcast_packet(&state, 0x02, data).await?;
+        util::broadcast_packet(&state, msg::USER_JOINED, data).await?;
 
         let data = util::make_server_information()?;
-        util::send_packet(&state, src, 0x17, data).await?;
+        util::send_packet(&state, src, msg::SERVER_INFORMATION, data).await?;
     } else {
         // Server notification creation
         let mut data = BytesMut::new();
@@ -84,7 +85,7 @@ pub async fn handle_client_to_server_ack(
         data.put_u32_le(1);
         data.put_u32_le(2);
         data.put_u32_le(3);
-        util::send_packet(&state, src, 0x05, data.to_vec()).await?;
+        util::send_packet(&state, src, msg::SERVER_TO_CLIENT_ACK, data.to_vec()).await?;
     }
 
     Ok(())
@@ -119,7 +120,7 @@ pub async fn handle_ready_to_play_signal(
     // Update game status
     {
         let status_data = util::make_update_game_status(&game_info_clone)?;
-        util::broadcast_packet(&state, 0x0E, status_data).await?;
+        util::broadcast_packet(&state, msg::UPDATE_GAME_STATUS, status_data).await?;
     }
 
     // Check if all users are ready
@@ -168,7 +169,7 @@ pub async fn handle_ready_to_play_signal(
         for player_addr in game_info_clone.players.iter() {
             let mut data = BytesMut::new();
             data.put_u8(0);
-            util::send_packet(&state, player_addr, 0x15, data.to_vec()).await?;
+            util::send_packet(&state, player_addr, msg::READY_TO_PLAY, data.to_vec()).await?;
         }
     }
     Ok(())
@@ -234,14 +235,14 @@ pub async fn handle_game_data(
                 buf.put_u8(0); // Empty string
                 buf.put_u16_le(data.len() as u16);
                 buf.put(data.as_slice());
-                (0x12, buf.to_vec())
+                (msg::GAME_DATA, buf.to_vec())
             }
-            simple_game_sync::ServerResponse::GameCache(position) => (0x13, vec![0x00, position]),
+            simple_game_sync::ServerResponse::GameCache(position) => (msg::GAME_CACHE, vec![0x00, position]),
         };
 
         debug!(
             { fields::PLAYER_ID } = output.player_id,
-            { fields::MESSAGE_TYPE } = format!("0x{:02X}", message_type),
+            message_type = msg::message_type_name(message_type),
             { fields::DATA_LENGTH } = data_to_send.len(),
             "Sending game data to player"
         );
@@ -305,14 +306,14 @@ pub async fn handle_game_cache(
                 buf.put_u8(0); // Empty string
                 buf.put_u16_le(data.len() as u16);
                 buf.put(data.as_slice());
-                (0x12, buf.to_vec())
+                (msg::GAME_DATA, buf.to_vec())
             }
-            simple_game_sync::ServerResponse::GameCache(position) => (0x13, vec![0x00, position]),
+            simple_game_sync::ServerResponse::GameCache(position) => (msg::GAME_CACHE, vec![0x00, position]),
         };
 
         debug!(
             { fields::PLAYER_ID } = output.player_id,
-            { fields::MESSAGE_TYPE } = format!("0x{:02X}", message_type),
+            message_type = msg::message_type_name(message_type),
             { fields::DATA_LENGTH } = data_to_send.len(),
             "Sending cache data to player"
         );

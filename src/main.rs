@@ -15,9 +15,12 @@ mod packet_util;
 mod handlers;
 use handlers::*;
 
+mod session_manager;
+
 mod game_sync;
 mod simple_game_sync;
 use handlers::data::*;
+use session_manager::SessionManager;
 
 // Configuration structures
 #[derive(Debug, Deserialize, Clone)]
@@ -181,8 +184,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (tx, mut rx) = mpsc::channel::<Message>(100);
 
-    // Centralized AppState with RwLock for efficiency
-    let state = Arc::new(AppState::new(tx.clone()));
+    // Centralized AppState with RwLock for efficiency (shared by all sessions)
+    let global_state = Arc::new(AppState::new(tx.clone()));
+
+    // Initialize Session Manager for TCP-like session handling
+    let (session_manager, packet_rx) = SessionManager::new();
+    let session_manager = Arc::new(session_manager);
+
+    // Start periodic session cleanup task
+    session_manager
+        .clone()
+        .start_cleanup_task(global_state.clone());
+
+    // Start session manager (spawns handlers for each client)
+    let manager_for_run = session_manager.clone();
+    let state_for_sessions = global_state.clone();
+    tokio::spawn(async move {
+        manager_for_run.run(packet_rx, state_for_sessions).await;
+    });
 
     info!("Server initialization complete");
 
@@ -209,82 +228,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     info!("Server ready to accept connections");
 
-    // Main game loop for game-related messages (Port 8080)
+    // Main UDP dispatcher - forwards packets to session manager
+    let packet_sender = session_manager.packet_sender();
     let mut buf = [0u8; 4096];
     loop {
         let (len, src) = main_socket.recv_from(&mut buf).await?;
-        let data = &buf[..len];
+        let data = buf[..len].to_vec();
 
-        // Try to get client info for richer logging context
-        let client_info = state.get_client(&src).await;
+        debug!(
+            { fields::ADDR } = %src,
+            { fields::PACKET_SIZE } = len,
+            "Packet received - forwarding to session manager"
+        );
 
-        // Create a span with session context - all logs within this span will automatically include these fields
-        let span = if let Some(ref client) = client_info {
-            // Logged in user with full context
-            if let Some(game_id) = client.game_id {
-                tracing::info_span!(
-                    "session",
-                    addr = %src,
-                    user = %client.username,
-                    user_id = client.user_id,
-                    game_id = game_id,
-                    session_id = %client.session_id
-                )
-            } else {
-                tracing::info_span!(
-                    "session",
-                    addr = %src,
-                    user = %client.username,
-                    user_id = client.user_id,
-                    session_id = %client.session_id
-                )
-            }
-        } else {
-            // Before login, only addr is available
-            tracing::info_span!("packet", addr = %src)
-        };
-        let _enter = span.enter();
-
-        debug!({ fields::PACKET_SIZE } = len, "Received packet");
-
-        match parse_packet(data) {
-            Ok(messages) => {
-                for message in messages.iter() {
-                    // 0 is special case, it means the first message
-                    if message.message_number == 0 && messages.len() == 1 {
-                        state.packet_peeker.write().await.insert(src, 0);
-                    }
-                }
-                for message in messages {
-                    let mut packet_peeker_lock = state.packet_peeker.write().await;
-                    let message_number_to_process = *packet_peeker_lock.get(&src).unwrap_or(&0);
-
-                    if message.message_number == message_number_to_process {
-                        // Update message number before processing to release lock quickly
-                        packet_peeker_lock.insert(src, message_number_to_process + 1);
-                        drop(packet_peeker_lock); // Explicitly release lock before long operation
-
-                        // Save message_number before moving message
-                        let msg_number = message.message_number;
-
-                        // Handle message and log errors without crashing
-                        if let Err(e) = handle_message(message, &src, state.clone()).await {
-                            error!(
-                                { fields::MESSAGE_NUMBER } = msg_number,
-                                { fields::ERROR } = %e,
-                                "Failed to handle message"
-                            );
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                warn!(
-                    { fields::PACKET_SIZE } = len,
-                    { fields::ERROR } = %e,
-                    "Failed to parse packet"
-                );
-            }
+        // Forward to session manager (will create session if needed)
+        if let Err(e) = packet_sender.send((src, data)).await {
+            warn!(
+                { fields::ADDR } = %src,
+                { fields::ERROR } = %e,
+                "Failed to forward packet to session manager"
+            );
         }
     }
 }
@@ -293,4 +256,84 @@ async fn main() -> Result<(), Box<dyn Error>> {
 pub struct Message {
     pub data: Vec<u8>,
     pub addr: std::net::SocketAddr,
+}
+
+/// Process a single packet within a session
+async fn process_packet_in_session(
+    data: Vec<u8>,
+    addr: std::net::SocketAddr,
+    global_state: Arc<AppState>,
+) {
+    // Get client info for packet span
+    let client_info = global_state.get_client(&addr).await;
+
+    let span = if let Some(ref client) = client_info {
+        if let Some(game_id) = client.game_id {
+            tracing::info_span!(
+                "packet",
+                { fields::USER_NAME } = %client.username,
+                { fields::USER_ID } = client.user_id,
+                { fields::GAME_ID } = game_id,
+                { fields::CONNECTION_TYPE } = client.conn_type,
+                ping = client.ping,
+            )
+        } else {
+            tracing::info_span!(
+                "packet",
+                { fields::USER_NAME } = %client.username,
+                { fields::USER_ID } = client.user_id,
+                { fields::CONNECTION_TYPE } = client.conn_type,
+                ping = client.ping,
+            )
+        }
+    } else {
+        tracing::info_span!("packet")
+    };
+    let _enter = span.enter();
+
+    debug!("Processing packet");
+
+    // Parse and handle messages
+    match parse_packet(&data) {
+        Ok(messages) => {
+            for message in messages.iter() {
+                // 0 is special case, it means the first message
+                if message.message_number == 0 && messages.len() == 1 {
+                    global_state.packet_peeker.write().await.insert(addr, 0);
+                }
+            }
+
+            for message in messages {
+                let mut packet_peeker_lock = global_state.packet_peeker.write().await;
+                let message_number_to_process = *packet_peeker_lock.get(&addr).unwrap_or(&0);
+
+                if message.message_number == message_number_to_process {
+                    // Update message number before processing to release lock quickly
+                    packet_peeker_lock.insert(addr, message_number_to_process + 1);
+                    drop(packet_peeker_lock); // Explicitly release lock before long operation
+
+                    // Save message_number before moving message
+                    let msg_number = message.message_number;
+                    let msg_type = message.message_type;
+
+                    // Handle message and log errors without crashing
+                    if let Err(e) = handle_message(message, &addr, global_state.clone()).await {
+                        error!(
+                            { fields::MESSAGE_NUMBER } = msg_number,
+                            { fields::MESSAGE_TYPE } = format!("0x{:02X}", msg_type),
+                            { fields::ERROR } = %e,
+                            "Failed to handle message"
+                        );
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            warn!(
+                { fields::PACKET_SIZE } = data.len(),
+                { fields::ERROR } = %e,
+                "Failed to parse packet"
+            );
+        }
+    }
 }

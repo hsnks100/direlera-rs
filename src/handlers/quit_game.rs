@@ -3,6 +3,7 @@ use std::error::Error;
 use std::sync::Arc;
 use tracing::{error, info};
 
+use crate::kaillera::message_types as msg;
 use crate::*;
 /*
 
@@ -121,7 +122,7 @@ pub async fn handle_quit_game(
         let mut data = BytesMut::new();
         data.put_u8(0x00);
         data.put_u32_le(game_info_clone.game_id);
-        util::broadcast_packet(&state, 0x10, data.to_vec()).await?;
+        util::broadcast_packet(&state, msg::CLOSE_GAME, data.to_vec()).await?;
 
         // Quit game notification
         for player_addr in game_info_clone.players.iter() {
@@ -129,7 +130,7 @@ pub async fn handle_quit_game(
             data.put(username.as_bytes());
             data.put_u8(0);
             data.put_u16_le(user_id);
-            util::send_packet(&state, player_addr, 0x0B, data.to_vec()).await?;
+            util::send_packet(&state, player_addr, msg::QUIT_GAME, data.to_vec()).await?;
         }
     } else {
         info!(
@@ -141,14 +142,14 @@ pub async fn handle_quit_game(
         
         // Update game status
         let status_data = util::make_update_game_status(&game_info_clone)?;
-        util::broadcast_packet(&state, 0x0E, status_data).await?;
+        util::broadcast_packet(&state, msg::UPDATE_GAME_STATUS, status_data).await?;
 
         for player_addr in game_info_clone.players.iter() {
             let mut data = BytesMut::new();
             data.put(username.as_bytes());
             data.put_u8(0);
             data.put_u16_le(user_id);
-            util::send_packet(&state, player_addr, 0x0B, data.to_vec()).await?;
+            util::send_packet(&state, player_addr, msg::QUIT_GAME, data.to_vec()).await?;
         }
     }
     Ok(())

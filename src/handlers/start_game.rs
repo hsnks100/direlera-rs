@@ -4,6 +4,7 @@ use std::error::Error;
 use std::sync::Arc;
 use tracing::{debug, info};
 
+use crate::kaillera::message_types as msg;
 use crate::simple_game_sync;
 /*
 '     0x11 = Start Game
@@ -65,7 +66,7 @@ pub async fn handle_start_game(
 
     // Update game status
     let status_data = util::make_update_game_status(&game_info)?;
-    util::broadcast_packet(&state, 0x0E, status_data).await?;
+    util::broadcast_packet(&state, msg::UPDATE_GAME_STATUS, status_data).await?;
 
     // Send start game notification with each player's delay
     for (i, player_addr) in game_info.player_addrs.iter().enumerate() {
@@ -81,7 +82,7 @@ pub async fn handle_start_game(
         );
         data.put_u8((i + 1) as u8); // Player Number (1-indexed)
         data.put_u8(game_info.player_addrs.len() as u8); // Total Players
-        util::send_packet(&state, player_addr, 0x11, data.to_vec()).await?;
+        util::send_packet(&state, player_addr, msg::START_GAME, data.to_vec()).await?;
     }
     Ok(())
 }

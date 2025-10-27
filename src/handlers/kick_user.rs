@@ -3,6 +3,7 @@ use std::error::Error;
 use std::sync::Arc;
 use tracing::{error, info};
 
+use crate::kaillera::message_types as msg;
 use crate::*;
 /*
  **Client to Server**:
@@ -94,14 +95,14 @@ pub async fn handle_kick_user(
 
     // Update game status
     let status_data = util::make_update_game_status(&game_info_clone)?;
-    util::broadcast_packet(&state, 0x0E, status_data).await?;
+    util::broadcast_packet(&state, msg::UPDATE_GAME_STATUS, status_data).await?;
 
     for player_addr in game_info_clone.players.iter() {
         let mut data = BytesMut::new();
         data.put(username.as_bytes());
         data.put_u8(0);
         data.put_u16_le(client_user_id);
-        util::send_packet(&state, player_addr, 0x0B, data.to_vec()).await?;
+        util::send_packet(&state, player_addr, msg::QUIT_GAME, data.to_vec()).await?;
     }
 
     Ok(())

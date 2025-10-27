@@ -3,6 +3,7 @@ use std::error::Error;
 use std::sync::Arc;
 use tracing::{info, debug};
 
+use crate::kaillera::message_types as msg;
 use crate::util::*;
 use crate::*;
 
@@ -60,12 +61,12 @@ pub async fn handle_join_game(
     // Broadcast game status update to all clients
     let client_addresses = state.get_all_client_addrs().await;
     for addr in client_addresses {
-        util::send_packet(&state, &addr, 0x0E, status_data.clone()).await?;
+        util::send_packet(&state, &addr, msg::UPDATE_GAME_STATUS, status_data.clone()).await?;
     }
 
     // Generate player information and send to joining client
     let players_info = util::make_player_information(src, &state, &game_info).await?;
-    util::send_packet(&state, src, 0x0D, players_info.clone()).await?;
+    util::send_packet(&state, src, msg::PLAYER_INFORMATION, players_info.clone()).await?;
 
     // Generate join game response data
     let response_data = {
@@ -74,10 +75,10 @@ pub async fn handle_join_game(
     };
 
     // Send join game notification to ALL players (including the joining player)
-    // Each player manages their own list, so we send the new player info (0x0C) to everyone
+    // Each player manages their own list, so we send the new player info to everyone
     let game_players = game_info.players.clone();
     for player_addr in game_players {
-        util::send_packet(&state, &player_addr, 0x0C, response_data.clone()).await?;
+        util::send_packet(&state, &player_addr, msg::JOIN_GAME, response_data.clone()).await?;
     }
 
     Ok(())
