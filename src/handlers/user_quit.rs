@@ -1,6 +1,7 @@
 use bytes::{Buf, BufMut, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
+use tracing::{debug, info};
 
 use crate::*;
 /*
@@ -28,9 +29,11 @@ pub async fn handle_user_quit(
 
     // Remove client from list
     if let Some(client_info) = state.remove_client(src).await {
-        println!(
-            "User quit: username='{}', addr={}, message='{}'",
-            client_info.username, src, user_message
+        info!(
+            { fields::USER_NAME } = client_info.username.as_str(),
+            { fields::USER_ID } = client_info.user_id,
+            quit_message = user_message.as_str(),
+            "User quit"
         );
         let mut data = BytesMut::new();
         data.put(client_info.username.as_bytes());
@@ -40,9 +43,9 @@ pub async fn handle_user_quit(
         data.put_u8(0);
         util::broadcast_packet(&state, 0x01, data.to_vec()).await?;
     } else {
-        println!(
-            "Unknown client quit: addr={}, message='{}'",
-            src, user_message
+        debug!(
+            quit_message = user_message.as_str(),
+            "Unknown client quit"
         );
     }
     Ok(())

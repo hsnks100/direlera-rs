@@ -1,6 +1,7 @@
 use bytes::{Buf, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
+use tracing::{info, debug};
 
 use crate::util::*;
 use crate::*;
@@ -28,6 +29,8 @@ pub async fn handle_join_game(
     })
     .await?;
 
+    let username = client.username.clone();
+    
     util::with_game_mut(&state, src, |game_info| {
         // Only add if not already in the game (prevents duplicates)
         if game_info.players.insert(*src) {
@@ -35,9 +38,9 @@ pub async fn handle_join_game(
             game_info.player_addrs.push(*src);
             game_info.player_delays.push(conn_type as usize);
         } else {
-            println!(
-                "[JoinGame] Player {} already in game, skipping duplicate",
-                src
+            debug!(
+                { fields::GAME_ID } = game_id,
+                "Player already in game, skipping duplicate"
             );
         }
     })
@@ -47,7 +50,12 @@ pub async fn handle_join_game(
     let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
     let status_data = util::make_update_game_status(&game_info)?;
 
-    println!("Game status updated for game_id={}", game_id);
+    info!(
+        { fields::GAME_ID } = game_id,
+        { fields::USER_NAME } = username.as_str(),
+        { fields::PLAYER_COUNT } = game_info.num_players,
+        "Player joined game"
+    );
 
     // Broadcast game status update to all clients
     let client_addresses = state.get_all_client_addrs().await;

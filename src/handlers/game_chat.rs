@@ -2,6 +2,7 @@ use crate::*;
 use bytes::{BufMut, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
+use tracing::info;
 
 pub async fn handle_game_chat(
     message: kaillera::protocol::ParsedMessage,
@@ -23,9 +24,11 @@ pub async fn handle_game_chat(
     };
 
     if let Some(game_id) = game_id {
-        println!(
-            "Game chat: '{}' (Game ID {}): '{}'",
-            username, game_id, chat_message
+        info!(
+            { fields::GAME_ID } = game_id,
+            { fields::USER_NAME } = username.as_str(),
+            { fields::CHAT_MESSAGE } = chat_message.as_str(),
+            "Game chat message"
         );
 
         // Response creation
@@ -59,7 +62,10 @@ pub async fn handle_game_chat(
             state.tx.send(Message { data: packet, addr }).await?;
         }
     } else {
-        println!("Client '{}' is not in a game.", username);
+        tracing::warn!(
+            { fields::USER_NAME } = username.as_str(),
+            "Client attempted game chat but not in a game"
+        );
     }
 
     Ok(())

@@ -4,8 +4,12 @@ use crate::*;
 use bytes::{Buf, BytesMut};
 use tokio::io;
 use tokio::net::UdpSocket;
+use tracing::{debug, error};
 
-pub async fn handle_control_socket(control_socket: Arc<UdpSocket>) -> io::Result<()> {
+pub async fn handle_control_socket(
+    control_socket: Arc<UdpSocket>,
+    main_port: u16,
+) -> io::Result<()> {
     let mut buf = [0u8; 4096];
     loop {
         let (len, src) = control_socket.recv_from(&mut buf).await?;
@@ -13,11 +17,20 @@ pub async fn handle_control_socket(control_socket: Arc<UdpSocket>) -> io::Result
 
         // Handle the HELLO0.83 message
         if data == b"HELLO0.83\x00" {
-            let response = format!("HELLOD00D{}\0", crate::MAIN_PORT).into_bytes();
+            debug!(
+                { fields::ADDR } = %src,
+                { fields::PORT } = main_port,
+                "HELLO request received on control socket"
+            );
+            let response = format!("HELLOD00D{}\0", main_port).into_bytes();
             control_socket.send_to(&response, src).await?;
         }
         // Handle the PING message
         else if data == b"PING\x00" {
+            debug!(
+                { fields::ADDR } = %src,
+                "PING request received on control socket"
+            );
             let response = b"PONG\x00".to_vec();
             control_socket.send_to(&response, src).await?;
         } else {
@@ -25,9 +38,11 @@ pub async fn handle_control_socket(control_socket: Arc<UdpSocket>) -> io::Result
                 .iter()
                 .map(|&b| if b.is_ascii() { b as char } else { '.' }) // Replace invalid with '.'
                 .collect();
-            eprintln!(
-                "Unknown message on control socket from {}: {:?}, {}",
-                src, data, ascii_string
+            error!(
+                { fields::ADDR } = %src,
+                { fields::PACKET_SIZE } = data.len(),
+                message_preview = &ascii_string[..ascii_string.len().min(50)],
+                "Unknown message on control socket"
             );
         }
     }
@@ -44,8 +59,10 @@ pub fn parse_packet(data: &[u8]) -> Result<Vec<kaillera::protocol::ParsedMessage
 
     for _ in 0..num_messages {
         if buf.len() < 5 {
-            println!("Current buffer content: {:02X?}", buf);
-            return Err("Incomplete message header.".to_string());
+            return Err(format!(
+                "Incomplete message header. Buffer size: {}",
+                buf.len()
+            ));
         }
 
         let message_number = buf.get_u16_le();

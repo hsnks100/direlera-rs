@@ -2,6 +2,7 @@ use bytes::{Buf, BufMut, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
 use std::time::Instant;
+use tracing::info;
 use util::read_string;
 use uuid::Uuid;
 
@@ -21,13 +22,16 @@ pub async fn handle_user_login(
     // 1B: Connection Type
     let conn_type = if !buf.is_empty() { buf.get_u8() } else { 0 };
 
-    println!(
-        "User login info: username='{}', emulator='{}', conn_type={}, addr={}",
-        username, emulator_name, conn_type, src
-    );
-
     // Lock-free ID generation
     let user_id = state.next_user_id();
+
+    info!(
+        { fields::USER_NAME } = username.as_str(),
+        { fields::USER_ID } = user_id,
+        emulator = emulator_name.as_str(),
+        { fields::CONNECTION_TYPE } = conn_type,
+        "User logged in"
+    );
 
     let client = ClientInfo {
         session_id: Uuid::new_v4(),
