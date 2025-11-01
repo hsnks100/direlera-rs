@@ -7,13 +7,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, Instrument};
 
 use crate::{fields, AppState};
 
 /// Configuration for session timeout behavior
-const SESSION_TIMEOUT: Duration = Duration::from_secs(120);
-const CLEANUP_INTERVAL: Duration = Duration::from_secs(30);
+const SESSION_TIMEOUT: Duration = Duration::from_secs(30);
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(3);
 
 /// Represents a single UDP "session" - simulating TCP connection
 struct UdpSession {
@@ -141,9 +141,42 @@ impl SessionManager {
 
                 drop(sessions);
 
-                // Clean up from global state
+                // Clean up from global state and notify lobby
                 for addr in to_remove {
-                    global_state.remove_client(&addr).await;
+                    if let Some(client_info) = global_state.get_client(&addr).await {
+                        // If the client was in a game, perform quit game flow
+                        if client_info.game_id.is_some() {
+                            let _ = crate::handlers::quit_game::handle_quit_game(
+                                vec![0x00, 0xFF, 0xFF],
+                                &addr,
+                                global_state.clone(),
+                            )
+                            .await;
+                        }
+
+                        // Remove client and broadcast USER_QUIT to lobby
+                        if let Some(removed) = global_state.remove_client(&addr).await {
+                            use crate::kaillera::message_types as msg;
+                            use bytes::BufMut;
+                            use bytes::BytesMut;
+                            let mut data = BytesMut::new();
+                            data.put(removed.username.as_bytes());
+                            data.put_u8(0);
+                            data.put_u16_le(removed.user_id);
+                            // Reason message similar to user_quit: e.g. "timeout"
+                            data.put("timeout".as_bytes());
+                            data.put_u8(0);
+                            let _ = crate::handlers::util::broadcast_packet(
+                                &global_state,
+                                msg::USER_QUIT,
+                                data.to_vec(),
+                            )
+                            .await;
+                        }
+                    } else {
+                        // Fallback: ensure removal
+                        let _ = global_state.remove_client(&addr).await;
+                    }
                 }
             }
         });
@@ -158,46 +191,105 @@ async fn handle_session(
     global_state: Arc<AppState>,
 ) {
     let span = tracing::info_span!("session", { fields::ADDR } = %addr);
-    let _enter = span.enter();
 
-    info!("Session handler started");
+    async move {
+        info!("Session handler started");
 
-    // Session loop - similar to TCP recv loop
-    loop {
-        match timeout(SESSION_TIMEOUT, rx.recv()).await {
-            Ok(Some(data)) => {
-                // Update last_seen
-                {
-                    let mut sessions_lock = sessions.write().await;
-                    if let Some(session) = sessions_lock.get_mut(&addr) {
-                        session.last_seen = Instant::now();
+        // Session loop - similar to TCP recv loop
+        loop {
+            match timeout(SESSION_TIMEOUT, rx.recv()).await {
+                Ok(Some(data)) => {
+                    // Update last_seen
+                    {
+                        let mut sessions_lock = sessions.write().await;
+                        if let Some(session) = sessions_lock.get_mut(&addr) {
+                            session.last_seen = Instant::now();
+                        }
                     }
+
+                    debug!({ fields::PACKET_SIZE } = data.len(), "Received packet");
+
+                    // Process the packet
+                    crate::process_packet_in_session(data, addr, global_state.clone()).await;
                 }
-
-                debug!({ fields::PACKET_SIZE } = data.len(), "Received packet");
-
-                // Process the packet
-                crate::process_packet_in_session(data, addr, global_state.clone()).await;
-            }
-            Ok(None) => {
-                info!("Session channel closed");
-                break;
-            }
-            Err(_) => {
-                warn!(timeout_duration = ?SESSION_TIMEOUT, "Session timeout");
-                break;
+                Ok(None) => {
+                    info!("Session channel closed");
+                    // Notify lobby and perform quit if necessary before breaking
+                    if let Some(client_info) = global_state.get_client(&addr).await {
+                        if client_info.game_id.is_some() {
+                            let _ = crate::handlers::quit_game::handle_quit_game(
+                                vec![0x00, 0xFF, 0xFF],
+                                &addr,
+                                global_state.clone(),
+                            )
+                            .await;
+                        }
+                        if let Some(removed) = global_state.remove_client(&addr).await {
+                            use crate::kaillera::message_types as msg;
+                            use bytes::BufMut;
+                            use bytes::BytesMut;
+                            let mut data = BytesMut::new();
+                            data.put(removed.username.as_bytes());
+                            data.put_u8(0);
+                            data.put_u16_le(removed.user_id);
+                            data.put("disconnected".as_bytes());
+                            data.put_u8(0);
+                            let _ = crate::handlers::util::broadcast_packet(
+                                &global_state,
+                                msg::USER_QUIT,
+                                data.to_vec(),
+                            )
+                            .await;
+                        }
+                    }
+                    break;
+                }
+                Err(_) => {
+                    warn!(timeout_duration = ?SESSION_TIMEOUT, "Session timeout");
+                    // Notify lobby and perform quit if necessary before breaking
+                    if let Some(client_info) = global_state.get_client(&addr).await {
+                        if client_info.game_id.is_some() {
+                            let _ = crate::handlers::quit_game::handle_quit_game(
+                                vec![0x00, 0xFF, 0xFF],
+                                &addr,
+                                global_state.clone(),
+                            )
+                            .await;
+                        }
+                        if let Some(removed) = global_state.remove_client(&addr).await {
+                            use crate::kaillera::message_types as msg;
+                            use bytes::BufMut;
+                            use bytes::BytesMut;
+                            let mut data = BytesMut::new();
+                            data.put(removed.username.as_bytes());
+                            data.put_u8(0);
+                            data.put_u16_le(removed.user_id);
+                            data.put("timeout".as_bytes());
+                            data.put_u8(0);
+                            let _ = crate::handlers::util::broadcast_packet(
+                                &global_state,
+                                msg::USER_QUIT,
+                                data.to_vec(),
+                            )
+                            .await;
+                        }
+                    }
+                    break;
+                }
             }
         }
+
+        // Clean up session
+        {
+            let mut sessions_lock = sessions.write().await;
+            sessions_lock.remove(&addr);
+        }
+
+        // Clean up from global state (safe even if already removed)
+        let _ = global_state.remove_client(&addr).await;
+
+        info!("Session terminated");
     }
-
-    // Clean up session
-    {
-        let mut sessions_lock = sessions.write().await;
-        sessions_lock.remove(&addr);
-    }
-
-    // Clean up from global state
-    global_state.remove_client(&addr).await;
-
-    info!("Session terminated");
+    .instrument(span)
+    .await
 }
