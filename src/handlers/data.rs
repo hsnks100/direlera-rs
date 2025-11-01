@@ -155,7 +155,8 @@ pub struct GameInfo {
     pub game_id: u32,
     pub game_name: String,
     pub emulator_name: String,
-    pub owner: String,
+    pub owner: String,      // Display name (for backward compatibility)
+    pub owner_user_id: u16, // Owner's user_id for authorization checks
     pub num_players: u8,
     pub max_players: u8,
     pub game_status: u8, // 0=Waiting, 1=Playing, 2=Netsync

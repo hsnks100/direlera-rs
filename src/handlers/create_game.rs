@@ -13,6 +13,18 @@ pub async fn handle_create_game(
     src: &std::net::SocketAddr,
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn Error>> {
+    // Check if user is already in a game
+    if let Some(client_info) = state.get_client(src).await {
+        if let Some(existing_game_id) = client_info.game_id {
+            tracing::warn!(
+                { fields::USER_NAME } = client_info.username.as_str(),
+                { fields::GAME_ID } = existing_game_id,
+                "User attempted to create game while already in a game"
+            );
+            return Ok(()); // Silently ignore invalid request
+        }
+    }
+
     // Parse the message to extract game_name
     let mut buf = BytesMut::from(&message.data[..]);
     let _ = util::read_string(&mut buf); // Empty String
@@ -24,7 +36,7 @@ pub async fn handle_create_game(
     let game_id = state.next_game_id();
 
     // Get client_info
-    let (username, emulator_name, conn_type, _user_id) =
+    let (username, emulator_name, conn_type, user_id) =
         util::fetch_client_info(src, &state).await?;
 
     // Create new game
@@ -35,6 +47,7 @@ pub async fn handle_create_game(
         game_name: game_name.clone(),
         emulator_name: emulator_name.clone(),
         owner: username.clone(),
+        owner_user_id: user_id, // Store owner's user_id for authorization
         num_players: 1,
         max_players: 4,
         game_status: 0, // Waiting

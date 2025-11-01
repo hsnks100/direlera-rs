@@ -1,7 +1,7 @@
 use bytes::{Buf, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 use crate::kaillera::message_types as msg;
 use crate::util::*;
@@ -25,13 +25,24 @@ pub async fn handle_join_game(
     let client = state.get_client(src).await.ok_or("Client not found")?;
     let conn_type = client.conn_type;
 
+    // Prevent joining if user is already in any game (same or different)
+    if let Some(current_game_id) = client.game_id {
+        tracing::warn!(
+            { fields::USER_NAME } = client.username.as_str(),
+            { fields::GAME_ID } = game_id,
+            current_game_id = current_game_id,
+            "User attempted to join game while already in a game"
+        );
+        return Ok(()); // Silently ignore invalid request
+    }
+
     util::with_client_mut(&state, src, |client_info| {
         client_info.game_id = Some(game_id);
     })
     .await?;
 
     let username = client.username.clone();
-    
+
     util::with_game_mut(&state, src, |game_info| {
         // Only add if not already in the game (prevents duplicates)
         if game_info.players.insert(*src) {

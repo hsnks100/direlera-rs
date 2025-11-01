@@ -100,11 +100,13 @@ pub async fn handle_quit_game(
     })
     .await?;
 
-    if game_info_clone.owner == username {
+    // Check if quitter is the owner using user_id (to prevent nickname abuse)
+    if game_info_clone.owner_user_id == user_id {
         // Close the game - Remove game from games list
         info!(
             { fields::GAME_ID } = game_info_clone.game_id,
             { fields::USER_NAME } = username.as_str(),
+            { fields::USER_ID } = user_id,
             "Owner quit - closing game"
         );
         state.remove_game(game_info_clone.game_id).await;
@@ -139,7 +141,7 @@ pub async fn handle_quit_game(
             { fields::PLAYER_COUNT } = game_info_clone.num_players,
             "Player quit game"
         );
-        
+
         // Update game status
         let status_data = util::make_update_game_status(&game_info_clone)?;
         util::broadcast_packet(&state, msg::UPDATE_GAME_STATUS, status_data).await?;
