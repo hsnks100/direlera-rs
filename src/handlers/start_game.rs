@@ -2,7 +2,7 @@ use crate::*;
 use bytes::{Buf, BufMut, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::kaillera::message_types as msg;
 use crate::simple_game_sync;
@@ -38,10 +38,23 @@ pub async fn handle_start_game(
     let _ = util::read_string(&mut buf); // Empty String
     let _ = buf.get_u32_le(); // 0xFFFF 0xFF 0xFF
 
-    let game_id = {
-        let client = state.get_client(src).await.ok_or("Client not found")?;
-        client.game_id.ok_or("Client not in a game")?
-    };
+    let client = state.get_client(src).await.ok_or("Client not found")?;
+    let requester_username = client.username.clone();
+    let requester_user_id = client.user_id;
+    let game_id = client.game_id.ok_or("Client not in a game")?;
+
+    // Check if requester is the game owner (using user_id to prevent nickname abuse)
+    let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
+    if game_info.owner_user_id != requester_user_id {
+        warn!(
+            { fields::USER_NAME } = requester_username.as_str(),
+            { fields::USER_ID } = requester_user_id,
+            { fields::GAME_ID } = game_id,
+            owner_user_id = game_info.owner_user_id,
+            "Non-owner attempted to start game"
+        );
+        return Ok(()); // Silently ignore invalid request
+    }
 
     // Initialize SimpleGameSync when game starts
     util::with_game_mut(&state, src, |game_info| {

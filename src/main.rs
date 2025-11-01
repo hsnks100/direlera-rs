@@ -99,6 +99,7 @@ fn load_config() -> Config {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    color_eyre::install()?;
     // Load configuration from direlera.toml
     let config = load_config();
 
@@ -231,8 +232,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Main UDP dispatcher - forwards packets to session manager
     let packet_sender = session_manager.packet_sender();
     let mut buf = [0u8; 4096];
+
     loop {
-        let (len, src) = main_socket.recv_from(&mut buf).await?;
+        let recv_result = main_socket.recv_from(&mut buf).await;
+        let (len, src) = match recv_result {
+            Ok(ok) => ok,
+            Err(e) => {
+                // recv_from errors are usually system-level issues, not client-specific
+                // Log at debug level to avoid spam, as these are often expected
+                debug!(
+                    { fields::ERROR } = %e,
+                    "recv_from failed, continuing"
+                );
+                continue;
+            }
+        };
         let data = buf[..len].to_vec();
 
         debug!(
