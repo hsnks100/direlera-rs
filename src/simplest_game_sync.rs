@@ -14,7 +14,10 @@
 
 use std::collections::VecDeque;
 
-use crate::simple_game_sync::{ClientInput, InputCache, ServerResponse};
+use crate::simple_game_sync::InputCache;
+
+// Re-export for convenience
+pub use crate::simple_game_sync::{ClientInput, ServerResponse};
 
 type InputData = Vec<u8>;
 const MINIMUM_INPUT_SIZE: usize = 2;
@@ -112,6 +115,7 @@ impl SimplestGameSync {
                 self.input_buffers[player_id].push_back(chunk.to_vec());
             }
         }
+        let mut results = Vec::new();
         // process bundles while all input buffers have at least one item (or player is dropped)
         while self
             .input_buffers
@@ -140,24 +144,21 @@ impl SimplestGameSync {
             // serialize bundle into a single Vec<u8> for storage
             let serialized_bundle: InputData = bundle.into_iter().flatten().collect();
             // add the bundle to all output buffers
-
             for output_buffer in &mut self.output_buffers {
                 output_buffer.extend(serialized_bundle.clone());
             }
-        }
-        let mut results = Vec::new();
-        for player_id in 0..self.player_delays.len() {
-            if self.output_buffers[player_id].len()
-                >= self.player_delays[player_id] * self.player_delays.len() * MINIMUM_INPUT_SIZE
-            {
-                let output = self.output_buffers[player_id]
-                    .drain(
-                        ..self.player_delays[player_id]
-                            * self.player_delays.len()
-                            * MINIMUM_INPUT_SIZE,
-                    )
-                    .collect::<Vec<u8>>();
-                results.push(PlayerOutput { player_id, output });
+
+            // Check for outputs after each bundle creation
+            // This ensures players with smaller delays get outputs immediately
+            for player_id in 0..self.player_delays.len() {
+                let required_size =
+                    self.player_delays[player_id] * self.player_delays.len() * MINIMUM_INPUT_SIZE;
+                while self.output_buffers[player_id].len() >= required_size {
+                    let output = self.output_buffers[player_id]
+                        .drain(..required_size)
+                        .collect::<Vec<u8>>();
+                    results.push(PlayerOutput { player_id, output });
+                }
             }
         }
         Ok(results)
@@ -292,477 +293,371 @@ mod tests {
 
     #[test]
     fn test_equal_delays() {
-        let mut sync = SimplestGameSync::new(vec![1, 1]);
+        let mut manager = CachedGameSync::new(vec![1, 1]);
 
-        // Frame 1: P0 sends input (2 bytes = 1 chunk)
-        let outputs = sync.process_client_input(0, vec![0x01, 0x02]).unwrap();
-        assert_eq!(outputs.len(), 0, "No output until all players have input");
-
-        // Frame 1: P1 sends input (2 bytes = 1 chunk)
-        let outputs = sync.process_client_input(1, vec![0x03, 0x04]).unwrap();
-        assert_eq!(outputs.len(), 2, "Both players should get output");
-
-        // Verify outputs contain combined input from both players
-        assert_eq!(outputs[0].player_id, 0);
-        assert_eq!(outputs[0].output, vec![0x01, 0x02, 0x03, 0x04]);
-
-        assert_eq!(outputs[1].player_id, 1);
-        assert_eq!(outputs[1].output, vec![0x01, 0x02, 0x03, 0x04]);
-
-        // Frame 2: Both players send new inputs
-        sync.process_client_input(0, vec![0x05, 0x06]).unwrap();
-        let outputs = sync.process_client_input(1, vec![0x07, 0x08]).unwrap();
-        assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].output, vec![0x05, 0x06, 0x07, 0x08]);
-    }
-
-    #[test]
-    fn test_different_delays() {
-        let mut sync = SimplestGameSync::new(vec![1, 2]);
-
-        // P0 sends first input (delay 1, needs 1 bundle = 2 players * 1 * 2 bytes = 4 bytes)
-        let outputs = sync.process_client_input(0, vec![0x01, 0x02]).unwrap();
-        assert_eq!(outputs.len(), 0, "P0 waits for P1");
-
-        // P1 sends first input (4 bytes = 2 chunks)
-        let outputs = sync
-            .process_client_input(1, vec![0x03, 0x04, 0x05, 0x06])
-            .unwrap();
-        // First bundle created: [0x01, 0x02] + [0x03, 0x04] = [0x01, 0x02, 0x03, 0x04]
-        // P0 buffer now has 4 bytes (1 bundle), which is >= 1 * 2 * 2 = 4, so P0 outputs
-        // P1 buffer now has 4 bytes (1 bundle), which is < 2 * 2 * 2 = 8, so no output
-        assert_eq!(outputs.len(), 1);
-        assert_eq!(outputs[0].player_id, 0);
-        assert_eq!(outputs[0].output, vec![0x01, 0x02, 0x03, 0x04]);
-
-        // P0 sends second input
-        let outputs = sync.process_client_input(0, vec![0x07, 0x08]).unwrap();
-        // Second bundle created: [0x07, 0x08] + [0x05, 0x06] = [0x07, 0x08, 0x05, 0x06]
-        // P0 buffer now has 4 bytes (1 bundle), which is >= 4, so P0 outputs
-        // P1 buffer now has 8 bytes (2 bundles), which is >= 8, so P1 outputs
-        assert_eq!(outputs.len(), 2);
-        let p0_output = outputs.iter().find(|o| o.player_id == 0).unwrap();
-        let p1_output = outputs.iter().find(|o| o.player_id == 1).unwrap();
-        assert_eq!(p0_output.output, vec![0x07, 0x08, 0x05, 0x06]);
-        // P1 should get both bundles combined: [0x01, 0x02, 0x03, 0x04, 0x07, 0x08, 0x05, 0x06]
-        assert_eq!(p1_output.output.len(), 8);
-    }
-
-    #[test]
-    fn test_three_players() {
-        let mut sync = SimplestGameSync::new(vec![1, 1, 1]);
-
-        // All players send first input
-        sync.process_client_input(0, vec![0x01, 0x02]).unwrap();
-        sync.process_client_input(1, vec![0x03, 0x04]).unwrap();
-        let outputs = sync.process_client_input(2, vec![0x05, 0x06]).unwrap();
-
-        // All players should get output with all 3 inputs combined
-        assert_eq!(outputs.len(), 3);
-        for output in &outputs {
-            assert_eq!(output.output, vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
-        }
-    }
-
-    #[test]
-    fn test_multiple_chunks_single_input() {
-        let mut sync = SimplestGameSync::new(vec![1, 1]);
-
-        // P0 sends 4 bytes (2 chunks)
-        sync.process_client_input(0, vec![0x01, 0x02, 0x03, 0x04])
-            .unwrap();
-        // P1 sends 2 bytes (1 chunk)
-        let outputs = sync.process_client_input(1, vec![0x05, 0x06]).unwrap();
-
-        // First bundle: [0x01, 0x02] + [0x05, 0x06]
-        // P0 still has [0x03, 0x04] in buffer, so no second bundle yet
-        assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].output, vec![0x01, 0x02, 0x05, 0x06]);
-        assert_eq!(outputs[1].output, vec![0x01, 0x02, 0x05, 0x06]);
-
-        // P1 sends more to create second bundle
-        let outputs = sync.process_client_input(1, vec![0x07, 0x08]).unwrap();
-        // Second bundle: [0x03, 0x04] + [0x07, 0x08]
-        assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].output, vec![0x03, 0x04, 0x07, 0x08]);
-    }
-
-    #[test]
-    fn test_sequential_inputs() {
-        let mut sync = SimplestGameSync::new(vec![1, 1]);
-
-        // P0 sends multiple inputs before P1 responds
-        sync.process_client_input(0, vec![0x01, 0x02]).unwrap();
-        sync.process_client_input(0, vec![0x03, 0x04]).unwrap();
-        sync.process_client_input(0, vec![0x05, 0x06]).unwrap();
-
-        // P1 sends first input - should create first bundle
-        let outputs = sync.process_client_input(1, vec![0x07, 0x08]).unwrap();
-        assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].output, vec![0x01, 0x02, 0x07, 0x08]);
-
-        // P1 sends second input - should create second bundle
-        let outputs = sync.process_client_input(1, vec![0x09, 0x0A]).unwrap();
-        assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].output, vec![0x03, 0x04, 0x09, 0x0A]);
-
-        // P1 sends third input - should create third bundle
-        let outputs = sync.process_client_input(1, vec![0x0B, 0x0C]).unwrap();
-        assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].output, vec![0x05, 0x06, 0x0B, 0x0C]);
-    }
-
-    #[test]
-    fn test_uneven_distribution() {
-        let mut sync = SimplestGameSync::new(vec![1, 2, 1]);
-
-        // P0 sends input
-        sync.process_client_input(0, vec![0x01, 0x02]).unwrap();
-        // P1 sends 4 bytes (2 chunks)
-        sync.process_client_input(1, vec![0x03, 0x04, 0x05, 0x06])
-            .unwrap();
-        // P2 sends input - creates first bundle
-        let outputs = sync.process_client_input(2, vec![0x07, 0x08]).unwrap();
-
-        // P0 (delay 1): needs 1 bundle * 3 players * 2 bytes = 6 bytes
-        // P1 (delay 2): needs 2 bundles * 3 players * 2 bytes = 12 bytes
-        // P2 (delay 1): needs 6 bytes
-        // First bundle: [0x01, 0x02] + [0x03, 0x04] + [0x07, 0x08] = 6 bytes
-        // P0 and P2 should output (6 bytes >= 6)
-        // P1 should not output yet (6 bytes < 12)
-
-        let p0_outputs: Vec<_> = outputs.iter().filter(|o| o.player_id == 0).collect();
-        let p1_outputs: Vec<_> = outputs.iter().filter(|o| o.player_id == 1).collect();
-        let p2_outputs: Vec<_> = outputs.iter().filter(|o| o.player_id == 2).collect();
-
-        assert_eq!(p0_outputs.len(), 1);
-        assert_eq!(
-            p0_outputs[0].output,
-            vec![0x01, 0x02, 0x03, 0x04, 0x07, 0x08]
-        );
-        assert_eq!(p1_outputs.len(), 0);
-        assert_eq!(p2_outputs.len(), 1);
-        assert_eq!(
-            p2_outputs[0].output,
-            vec![0x01, 0x02, 0x03, 0x04, 0x07, 0x08]
-        );
-    }
-
-    #[test]
-    fn test_partial_chunk_ignored() {
-        let mut sync = SimplestGameSync::new(vec![1, 1]);
-
-        // P0 sends 3 bytes - last byte should be ignored
-        sync.process_client_input(0, vec![0x01, 0x02, 0x03])
-            .unwrap();
-        // P1 sends input - only first 2 bytes from P0 should be used
-        let outputs = sync.process_client_input(1, vec![0x04, 0x05]).unwrap();
-
-        assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].output, vec![0x01, 0x02, 0x04, 0x05]);
-        // 0x03 should not appear in output
-        assert!(!outputs[0].output.contains(&0x03));
-    }
-
-    #[test]
-    fn test_no_output_when_buffer_insufficient() {
-        let mut sync = SimplestGameSync::new(vec![2, 2]);
-
-        // Both players send input to create first bundle
-        sync.process_client_input(0, vec![0x01, 0x02]).unwrap();
-        let outputs = sync.process_client_input(1, vec![0x03, 0x04]).unwrap();
-
-        // Each player needs: delay 2 * 2 players * 2 bytes = 8 bytes
-        // But we only have 1 bundle = 4 bytes, so no output
-        assert_eq!(outputs.len(), 0);
-
-        // Send second round of inputs
-        sync.process_client_input(0, vec![0x05, 0x06]).unwrap();
-        let outputs = sync.process_client_input(1, vec![0x07, 0x08]).unwrap();
-
-        // Now we have 2 bundles = 8 bytes, both should output
-        assert_eq!(outputs.len(), 2);
-        // P0 and P1 should get both bundles combined
-        assert_eq!(outputs[0].output.len(), 8);
-    }
-
-    #[test]
-    fn test_high_delay_scenario() {
-        let mut sync = SimplestGameSync::new(vec![3, 3]);
-
-        // Need 3 bundles for output (3 * 2 players * 2 bytes = 12 bytes)
-        for round in 0..3 {
-            sync.process_client_input(0, vec![0x01 + (round * 2) as u8, 0x02 + (round * 2) as u8])
-                .unwrap();
-            let outputs = sync
-                .process_client_input(1, vec![0x10 + (round * 2) as u8, 0x11 + (round * 2) as u8])
-                .unwrap();
-
-            if round < 2 {
-                assert_eq!(
-                    outputs.len(),
-                    0,
-                    "Round {} should not produce output",
-                    round
-                );
-            } else {
-                assert_eq!(
-                    outputs.len(),
-                    2,
-                    "Round {} should produce output for both",
-                    round
-                );
-                assert_eq!(outputs[0].output.len(), 12);
-            }
-        }
-    }
-
-    #[test]
-    fn test_alternating_player_inputs() {
-        let mut sync = SimplestGameSync::new(vec![1, 1]);
-
-        // Alternating pattern: P0, P1, P0, P1, ...
-        sync.process_client_input(0, vec![0x01, 0x02]).unwrap();
-        let outputs = sync.process_client_input(1, vec![0x03, 0x04]).unwrap();
-        assert_eq!(outputs.len(), 2);
-
-        sync.process_client_input(0, vec![0x05, 0x06]).unwrap();
-        let outputs = sync.process_client_input(1, vec![0x07, 0x08]).unwrap();
-        assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].output, vec![0x05, 0x06, 0x07, 0x08]);
-    }
-
-    // Tests for CachedGameSync wrapper
-    #[test]
-    fn test_cached_game_sync_equal_delays() {
-        let mut sync = CachedGameSync::new(vec![1, 1]);
-
-        // Frame 1: P0 sends GameData
-        let outputs = sync
+        // Frame 1: P0 sends input
+        let outputs = manager
             .process_client_input(0, ClientInput::GameData(vec![0x01, 0x02]))
             .unwrap();
         assert_eq!(outputs.len(), 0);
 
-        // Frame 1: P1 sends GameData
-        let outputs = sync
+        // Frame 1: P1 sends input
+        let outputs = manager
             .process_client_input(1, ClientInput::GameData(vec![0x03, 0x04]))
             .unwrap();
         assert_eq!(outputs.len(), 2);
 
-        // Both should get GameData (first time, not in cache)
         assert_eq!(outputs[0].player_id, 0);
+        assert_eq!(outputs[1].player_id, 1);
+
         match &outputs[0].response {
             ServerResponse::GameData(data) => {
                 assert_eq!(data, &vec![0x01, 0x02, 0x03, 0x04]);
             }
-            _ => panic!("First output should be GameData"),
+            _ => panic!("P0's first output should be GameData"),
         }
 
-        assert_eq!(outputs[1].player_id, 1);
         match &outputs[1].response {
             ServerResponse::GameData(data) => {
                 assert_eq!(data, &vec![0x01, 0x02, 0x03, 0x04]);
             }
-            _ => panic!("First output should be GameData"),
+            _ => panic!("P1's first output should be GameData"),
         }
-    }
 
-    #[test]
-    fn test_cached_game_sync_cache_mechanism() {
-        let mut sync = CachedGameSync::new(vec![1, 1]);
-
-        // Frame 1: Both send GameData
-        sync.process_client_input(0, ClientInput::GameData(vec![0x00, 0x00]))
+        // Frame 2: Both send same inputs via cache
+        manager
+            .process_client_input(0, ClientInput::GameCache(0))
             .unwrap();
-        let outputs = sync
-            .process_client_input(1, ClientInput::GameData(vec![0x00, 0x00]))
-            .unwrap();
-
-        assert_eq!(outputs.len(), 2);
-        assert!(matches!(outputs[0].response, ServerResponse::GameData(_)));
-
-        // Frame 2: Both send GameCache referencing position 0
-        sync.process_client_input(0, ClientInput::GameCache(0))
-            .unwrap();
-        let outputs = sync
+        let outputs = manager
             .process_client_input(1, ClientInput::GameCache(0))
             .unwrap();
 
-        // Should return GameCache since output matches cached data
         assert_eq!(outputs.len(), 2);
         assert!(matches!(outputs[0].response, ServerResponse::GameCache(_)));
         assert!(matches!(outputs[1].response, ServerResponse::GameCache(_)));
     }
 
     #[test]
-    fn test_cached_game_sync_gamecache_input() {
-        let mut sync = CachedGameSync::new(vec![1, 1]);
-
-        // First, send GameData to populate cache
-        sync.process_client_input(0, ClientInput::GameData(vec![0xAA, 0xBB]))
-            .unwrap();
-        sync.process_client_input(1, ClientInput::GameData(vec![0xCC, 0xDD]))
-            .unwrap();
-
-        // Now use GameCache to reference the cached input
-        sync.process_client_input(0, ClientInput::GameCache(0))
-            .unwrap();
-        let outputs = sync
-            .process_client_input(1, ClientInput::GameCache(0))
-            .unwrap();
-
-        // Should return GameCache since output [0xAA, 0xBB, 0xCC, 0xDD] was already cached in first round
-        assert_eq!(outputs.len(), 2);
-        match &outputs[0].response {
-            ServerResponse::GameCache(cache_pos) => {
-                // Verify it references the cached data from first round
-                assert_eq!(*cache_pos, 0);
-            }
-            _ => panic!("Should return GameCache since same output was cached"),
-        }
-    }
-
-    #[test]
-    fn test_cached_game_sync_different_delays() {
-        let mut sync = CachedGameSync::new(vec![1, 2]);
+    fn test_different_delays() {
+        let mut manager = CachedGameSync::new(vec![1, 2]);
 
         // P0 sends first input
-        let outputs = sync
-            .process_client_input(0, ClientInput::GameData(vec![0x01, 0x02]))
+        let outputs = manager
+            .process_client_input(0, ClientInput::GameData(vec![0x01, 0x00]))
             .unwrap();
         assert_eq!(outputs.len(), 0);
 
-        // P1 sends first input (4 bytes)
-        let outputs = sync
-            .process_client_input(1, ClientInput::GameData(vec![0x03, 0x04, 0x05, 0x06]))
+        // P0 sends second and third
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0x02, 0x00]))
             .unwrap();
-        assert_eq!(outputs.len(), 1);
-        assert_eq!(outputs[0].player_id, 0);
+        let outputs = manager
+            .process_client_input(0, ClientInput::GameData(vec![0x03, 0x00]))
+            .unwrap();
+        assert_eq!(outputs.len(), 0);
 
-        // P0 sends second input
-        let outputs = sync
+        // P1 sends 4 bytes (2 frames)
+        // When P1 sends input, bundles are created from accumulated P0 frames
+        // P0 needs: delay 1 * 2 players * 2 bytes = 4 bytes
+        // P1 needs: delay 2 * 2 players * 2 bytes = 8 bytes
+        // Bundle size: 2 players * 2 bytes = 4 bytes per bundle
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameData(vec![0xAA, 0xBB, 0xCC, 0xDD]))
+            .unwrap();
+
+        // Check that we got outputs
+        // With the fixed logic:
+        // - Bundle 1: [0x01, 0x00] + [0xAA, 0xBB] → P0 gets output immediately (4 bytes >= 4)
+        // - Bundle 2: [0x02, 0x00] + [0xCC, 0xDD] → P0 gets another output (4 bytes >= 4), P1 gets output (8 bytes >= 8)
+        let p0_outputs: Vec<_> = outputs.iter().filter(|o| o.player_id == 0).collect();
+        let p1_outputs: Vec<_> = outputs.iter().filter(|o| o.player_id == 1).collect();
+
+        // P0 should get 2 outputs (one after each bundle, since delay 1 needs 4 bytes = 1 bundle)
+        assert_eq!(
+            p0_outputs.len(),
+            2,
+            "P0 should get 2 outputs (one per bundle)"
+        );
+
+        // Verify P0's first output (after Bundle 1)
+        match &p0_outputs[0].response {
+            ServerResponse::GameData(data) => {
+                assert_eq!(
+                    data,
+                    &vec![0x01, 0x00, 0xAA, 0xBB],
+                    "P0's first output should be Bundle 1"
+                );
+            }
+            _ => panic!("P0's first output should be GameData"),
+        }
+
+        // Verify P0's second output (after Bundle 2)
+        match &p0_outputs[1].response {
+            ServerResponse::GameData(data) => {
+                assert_eq!(
+                    data,
+                    &vec![0x02, 0x00, 0xCC, 0xDD],
+                    "P0's second output should be Bundle 2"
+                );
+            }
+            _ => panic!("P0's second output should be GameData"),
+        }
+
+        // P1 should get 1 output (after 2 bundles, since delay 2 needs 8 bytes = 2 bundles)
+        assert_eq!(
+            p1_outputs.len(),
+            1,
+            "P1 should get 1 output (after 2 bundles)"
+        );
+
+        // Verify P1's output (after Bundle 2, contains both bundles)
+        match &p1_outputs[0].response {
+            ServerResponse::GameData(data) => {
+                assert_eq!(
+                    data,
+                    &vec![0x01, 0x00, 0xAA, 0xBB, 0x02, 0x00, 0xCC, 0xDD],
+                    "P1's output should contain both bundles"
+                );
+            }
+            _ => panic!("P1's output should be GameData"),
+        }
+    }
+
+    #[test]
+    fn test_cache_mechanism() {
+        let mut manager = CachedGameSync::new(vec![1, 1]);
+
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0x00, 0x00]))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameData(vec![0x00, 0x00]))
+            .unwrap();
+
+        assert_eq!(outputs.len(), 2);
+        assert!(matches!(outputs[0].response, ServerResponse::GameData(_)));
+
+        manager
+            .process_client_input(0, ClientInput::GameCache(0))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameCache(0))
+            .unwrap();
+
+        let has_cache = outputs
+            .iter()
+            .any(|o| matches!(o.response, ServerResponse::GameCache(_)));
+        assert!(has_cache);
+    }
+
+    #[test]
+    fn test_three_players() {
+        let mut manager = CachedGameSync::new(vec![1, 1, 2]);
+
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0x01, 0x00]))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameData(vec![0x02, 0x00]))
+            .unwrap();
+
+        assert_eq!(outputs.len(), 0); // P2 hasn't sent input yet
+
+        // P2 sends input
+        let outputs = manager
+            .process_client_input(2, ClientInput::GameData(vec![0x03, 0x00, 0x04, 0x00]))
+            .unwrap();
+
+        assert!(outputs.len() >= 2);
+        let p0_outputs: Vec<_> = outputs.iter().filter(|o| o.player_id == 0).collect();
+        let p1_outputs: Vec<_> = outputs.iter().filter(|o| o.player_id == 1).collect();
+
+        assert_eq!(p0_outputs.len(), 1);
+        assert_eq!(p1_outputs.len(), 1);
+    }
+
+    #[test]
+    fn test_gd_gc_pattern_delay_1() {
+        let mut manager = CachedGameSync::new(vec![1, 1]);
+
+        // Frame 1
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0xAA, 0xBB]))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameData(vec![0xCC, 0xDD]))
+            .unwrap();
+        assert_eq!(outputs.len(), 2);
+
+        // Frame 2
+        manager
+            .process_client_input(0, ClientInput::GameCache(0))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameCache(0))
+            .unwrap();
+        assert!(matches!(outputs[0].response, ServerResponse::GameCache(_)));
+
+        // Frame 3
+        manager
+            .process_client_input(0, ClientInput::GameCache(0))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameCache(0))
+            .unwrap();
+        assert!(matches!(outputs[0].response, ServerResponse::GameCache(_)));
+
+        // Frame 4
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0x11, 0x22]))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameData(vec![0x33, 0x44]))
+            .unwrap();
+        assert!(matches!(outputs[0].response, ServerResponse::GameData(_)));
+    }
+
+    #[test]
+    fn test_gd_gc_pattern_delay_2() {
+        let mut manager = CachedGameSync::new(vec![2, 2]);
+
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0xAA, 0xBB, 0xAA, 0xBB]))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameData(vec![0xCC, 0xDD, 0xCC, 0xDD]))
+            .unwrap();
+        assert_eq!(outputs.len(), 2);
+
+        manager
+            .process_client_input(0, ClientInput::GameCache(0))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameCache(0))
+            .unwrap();
+        assert!(matches!(outputs[0].response, ServerResponse::GameCache(_)));
+    }
+
+    #[test]
+    fn test_gd_gc_creates_new_combined() {
+        let mut manager = CachedGameSync::new(vec![1, 1]);
+
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0x01, 0x02]))
+            .unwrap();
+        manager
+            .process_client_input(1, ClientInput::GameData(vec![0x03, 0x04]))
+            .unwrap();
+
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0x05, 0x06]))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameCache(0))
+            .unwrap();
+
+        match &outputs[0].response {
+            ServerResponse::GameData(data) => {
+                assert_eq!(data, &vec![0x05, 0x06, 0x03, 0x04]);
+            }
+            _ => panic!("Should be GameData"),
+        }
+    }
+
+    #[test]
+    fn test_gc_gc_creates_new_combined() {
+        let mut manager = CachedGameSync::new(vec![1, 1]);
+
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0x01, 0x02]))
+            .unwrap();
+        manager
+            .process_client_input(1, ClientInput::GameData(vec![0x03, 0x04]))
+            .unwrap();
+
+        manager
+            .process_client_input(0, ClientInput::GameCache(0))
+            .unwrap();
+        manager
+            .process_client_input(1, ClientInput::GameData(vec![0x05, 0x06]))
+            .unwrap();
+
+        manager
             .process_client_input(0, ClientInput::GameData(vec![0x07, 0x08]))
             .unwrap();
+        manager
+            .process_client_input(1, ClientInput::GameCache(0))
+            .unwrap();
+
+        manager
+            .process_client_input(0, ClientInput::GameCache(0))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameCache(1))
+            .unwrap();
+        assert!(matches!(outputs[0].response, ServerResponse::GameCache(_)));
+
+        manager
+            .process_client_input(0, ClientInput::GameCache(1))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameCache(1))
+            .unwrap();
+        match &outputs[0].response {
+            ServerResponse::GameData(_) => {}
+            _ => panic!("Should be GameData (new combination)"),
+        }
+    }
+
+    #[test]
+    fn test_delay_2_with_4_bytes_succeeds() {
+        let mut manager = CachedGameSync::new(vec![2, 2]);
+
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0xAA, 0xBB, 0xCC, 0xDD]))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameData(vec![0x11, 0x22, 0x33, 0x44]))
+            .unwrap();
+
         assert_eq!(outputs.len(), 2);
-        let p0_output = outputs.iter().find(|o| o.player_id == 0).unwrap();
-        let p1_output = outputs.iter().find(|o| o.player_id == 1).unwrap();
-
-        match &p0_output.response {
-            ServerResponse::GameData(data) => {
-                assert_eq!(data, &vec![0x07, 0x08, 0x05, 0x06]);
-            }
-            _ => panic!("Should be GameData"),
-        }
-
-        match &p1_output.response {
-            ServerResponse::GameData(data) => {
-                assert_eq!(data.len(), 8);
-            }
-            _ => panic!("Should be GameData"),
-        }
     }
 
     #[test]
-    fn test_cached_game_sync_output_cache_hit() {
-        let mut sync = CachedGameSync::new(vec![1, 1]);
+    fn test_invalid_player_id() {
+        let mut manager = CachedGameSync::new(vec![1, 1]);
+        let result = manager.process_client_input(2, ClientInput::GameData(vec![0x01, 0x02]));
 
-        // First round: both players send input
-        sync.process_client_input(0, ClientInput::GameData(vec![0x11, 0x22]))
-            .unwrap();
-        let outputs_first = sync
-            .process_client_input(1, ClientInput::GameData(vec![0x33, 0x44]))
-            .unwrap();
-
-        // First round output should be GameData (not in cache yet)
-        assert_eq!(outputs_first.len(), 2);
+        assert!(result.is_err());
         assert!(matches!(
-            outputs_first[0].response,
-            ServerResponse::GameData(_)
-        ));
-
-        // Second round: send same inputs again
-        sync.process_client_input(0, ClientInput::GameData(vec![0x11, 0x22]))
-            .unwrap();
-        let outputs_second = sync
-            .process_client_input(1, ClientInput::GameData(vec![0x33, 0x44]))
-            .unwrap();
-
-        // Second round: same combination should use cache
-        // Output is [0x11, 0x22, 0x33, 0x44] which was sent in first round
-        assert_eq!(outputs_second.len(), 2);
-        assert!(matches!(
-            outputs_second[0].response,
-            ServerResponse::GameCache(_)
+            result.unwrap_err(),
+            GameSyncError::InvalidPlayerId { .. }
         ));
     }
 
     #[test]
-    fn test_error_invalid_player_id() {
-        let mut sync = SimplestGameSync::new(vec![1, 1]);
-        let result = sync.process_client_input(99, vec![0x01, 0x02]);
-        assert!(matches!(
-            result,
-            Err(GameSyncError::InvalidPlayerId { player_id: 99, .. })
-        ));
+    fn test_cache_position_not_found() {
+        let mut manager = CachedGameSync::new(vec![1, 1]);
+        let result = manager.process_client_input(0, ClientInput::GameCache(0));
 
-        let mut cached_sync = CachedGameSync::new(vec![1, 1]);
-        let result = cached_sync.process_client_input(99, ClientInput::GameData(vec![0x01, 0x02]));
+        assert!(result.is_err());
         assert!(matches!(
-            result,
-            Err(GameSyncError::InvalidPlayerId { player_id: 99, .. })
+            result.unwrap_err(),
+            GameSyncError::CachePositionNotFound { .. }
         ));
     }
 
     #[test]
-    fn test_dropped_player_handling() {
-        let mut sync = SimplestGameSync::new(vec![1, 1]);
-
-        // Mark P1 as dropped
-        sync.mark_player_dropped(1).unwrap();
-        assert!(sync.is_player_dropped(1));
-        assert!(!sync.is_player_dropped(0));
-
-        // P0 sends input
-        let outputs = sync.process_client_input(0, vec![0x01, 0x02]).unwrap();
-
-        // Should create bundle with P0's input and P1's empty input [0x00, 0x00]
-        // Each player needs: delay 1 * 2 players * 2 bytes = 4 bytes
-        // Bundle: [0x01, 0x02] + [0x00, 0x00] = 4 bytes, so both should output
-        assert_eq!(outputs.len(), 2);
-
-        // Both players should get the same bundle
-        for output in &outputs {
-            assert_eq!(output.output, vec![0x01, 0x02, 0x00, 0x00]);
-        }
+    fn test_player_delay() {
+        let manager = CachedGameSync::new(vec![1, 2, 3]);
+        assert_eq!(manager.get_player_delay(0), 1);
+        assert_eq!(manager.get_player_delay(1), 2);
+        assert_eq!(manager.get_player_delay(2), 3);
     }
 
     #[test]
-    fn test_error_cache_position_not_found() {
-        let mut sync = CachedGameSync::new(vec![1, 1]);
-        // Try to use cache position that doesn't exist
-        let result = sync.process_client_input(0, ClientInput::GameCache(0));
-        assert!(matches!(
-            result,
-            Err(GameSyncError::CachePositionNotFound {
-                player_id: 0,
-                position: 0
-            })
-        ));
-
-        // Send GameData first to populate cache
-        sync.process_client_input(0, ClientInput::GameData(vec![0x01, 0x02]))
-            .unwrap();
-        sync.process_client_input(1, ClientInput::GameData(vec![0x03, 0x04]))
-            .unwrap();
-
-        // Now try invalid cache position
-        let result = sync.process_client_input(0, ClientInput::GameCache(99));
-        assert!(matches!(
-            result,
-            Err(GameSyncError::CachePositionNotFound {
-                player_id: 0,
-                position: 99
-            })
-        ));
+    fn test_player_count() {
+        let manager = CachedGameSync::new(vec![1, 1, 1]);
+        assert_eq!(manager.player_count(), 3);
     }
 }

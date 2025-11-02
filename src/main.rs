@@ -19,6 +19,7 @@ mod session_manager;
 
 mod game_sync;
 mod simple_game_sync;
+mod simplest_game_sync;
 use handlers::data::*;
 use session_manager::SessionManager;
 

@@ -1,3 +1,4 @@
+use crate::simplest_game_sync;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
@@ -7,8 +8,6 @@ use std::{
 };
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
-
-use crate::simple_game_sync;
 
 type PlayerStatus = u8;
 pub const PLAYER_STATUS_PLAYING: PlayerStatus = 0;
@@ -162,7 +161,7 @@ pub struct GameInfo {
     pub game_status: u8, // 0=Waiting, 1=Playing, 2=Netsync
     pub players: HashSet<std::net::SocketAddr>,
     // New: SimpleGameSync for frame synchronization
-    pub sync_manager: Option<simple_game_sync::SimpleGameSync>,
+    pub sync_manager: Option<simplest_game_sync::CachedGameSync>,
     // Player addresses in order (indexed by player_id)
     pub player_addrs: Vec<std::net::SocketAddr>,
     // Player delays (indexed by player_id)

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use crate::kaillera::message_types as msg;
-use crate::simple_game_sync;
+use crate::simplest_game_sync;
 /*
 '     0x11 = Start Game
 '            Client Request:
@@ -60,11 +60,9 @@ pub async fn handle_start_game(
     util::with_game_mut(&state, src, |game_info| {
         game_info.game_status = 1; // Playing
 
-        // Initialize SimpleGameSync with player delays
+        // Initialize CachedGameSync with player delays
         let delays = game_info.player_delays.clone();
-        game_info.sync_manager = Some(simple_game_sync::SimpleGameSync::new_without_padding(
-            delays,
-        ));
+        game_info.sync_manager = Some(simplest_game_sync::CachedGameSync::new(delays));
     })
     .await?;
 

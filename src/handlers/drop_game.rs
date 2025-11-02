@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tracing::{debug, info};
 
 use crate::kaillera::message_types as msg;
+use crate::simplest_game_sync;
 use crate::*;
 
 /*
@@ -72,10 +73,12 @@ pub async fn execute_drop_game(
                 let frames_to_fill = player_delay * 10; // Conservative estimate
 
                 for _ in 0..frames_to_fill {
-                    let outputs = sync_manager.process_client_input(
-                        dropper_player_id,
-                        crate::simple_game_sync::ClientInput::GameData(vec![0x00, 0x00]),
-                    );
+                    let outputs = sync_manager
+                        .process_client_input(
+                            dropper_player_id,
+                            simplest_game_sync::ClientInput::GameData(vec![0x00, 0x00]),
+                        )
+                        .unwrap_or_default();
                     pending_outputs.extend(outputs);
                 }
 
@@ -125,13 +128,13 @@ pub async fn execute_drop_game(
         let target_addr = &player_addrs[output.player_id];
 
         let (message_type, data_to_send) = match output.response {
-            crate::simple_game_sync::ServerResponse::GameData(data) => {
+            simplest_game_sync::ServerResponse::GameData(data) => {
                 let mut buf = BytesMut::new();
                 buf.put_u8(0); // Null byte
                 buf.extend_from_slice(&data);
                 (0x12, buf.to_vec())
             }
-            crate::simple_game_sync::ServerResponse::GameCache(position) => {
+            simplest_game_sync::ServerResponse::GameCache(position) => {
                 let mut buf = BytesMut::new();
                 buf.put_u8(0); // Null byte
                 buf.put_u8(position);
@@ -152,7 +155,13 @@ pub async fn execute_drop_game(
     notification_data.put_u8(dropper_player_num);
 
     for player_addr in &game_players {
-        util::send_packet(state, player_addr, msg::DROP_GAME, notification_data.to_vec()).await?;
+        util::send_packet(
+            state,
+            player_addr,
+            msg::DROP_GAME,
+            notification_data.to_vec(),
+        )
+        .await?;
     }
 
     info!(
