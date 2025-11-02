@@ -12,7 +12,7 @@ use tracing::{debug, info, warn, Instrument};
 use crate::{fields, AppState};
 
 /// Configuration for session timeout behavior
-const SESSION_TIMEOUT: Duration = Duration::from_secs(30);
+const SESSION_TIMEOUT: Duration = Duration::from_secs(300);
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(3);
 
 /// Represents a single UDP "session" - simulating TCP connection

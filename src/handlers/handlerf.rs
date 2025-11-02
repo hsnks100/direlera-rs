@@ -218,11 +218,33 @@ pub async fn handle_game_data(
             .as_mut()
             .ok_or("SimpleGameSync not initialized")?;
 
+        let responsible_player_id = game_info
+            .dropped_players
+            .iter()
+            .enumerate()
+            .find(|(_, &dropped)| !dropped)
+            .map(|(player_id, _)| player_id)
+            .ok_or("No responsible player found")?;
+        let responsible_delay = game_info.player_delays[responsible_player_id];
+        let empty_input = vec![0x00; responsible_delay * 2];
+
+        // Process dropped player's input
+        let mut all_outputs = Vec::new();
+        for (dropped_player_id, &dropped) in game_info.dropped_players.iter().enumerate() {
+            if dropped {
+                all_outputs.extend(sync_manager.process_client_input(
+                    dropped_player_id,
+                    simple_game_sync::ClientInput::GameData(empty_input.clone()),
+                ));
+            }
+        }
         // Process input using SimpleGameSync
-        sync_manager.process_client_input(
+        let outputs = sync_manager.process_client_input(
             player_id,
             simple_game_sync::ClientInput::GameData(game_data),
-        )
+        );
+        all_outputs.extend(outputs);
+        all_outputs
     };
 
     // Send outputs to respective players
@@ -237,7 +259,9 @@ pub async fn handle_game_data(
                 buf.put(data.as_slice());
                 (msg::GAME_DATA, buf.to_vec())
             }
-            simple_game_sync::ServerResponse::GameCache(position) => (msg::GAME_CACHE, vec![0x00, position]),
+            simple_game_sync::ServerResponse::GameCache(position) => {
+                (msg::GAME_CACHE, vec![0x00, position])
+            }
         };
 
         debug!(
@@ -289,11 +313,35 @@ pub async fn handle_game_cache(
             .as_mut()
             .ok_or("SimpleGameSync not initialized")?;
 
+        // Find the lowest player_id among non-dropped players (responsible player)
+        let responsible_player_id = game_info
+            .dropped_players
+            .iter()
+            .enumerate()
+            .find(|(_, &is_dropped)| !is_dropped)
+            .map(|(player_id, _)| player_id)
+            .ok_or("All players are dropped")?;
+        let responsible_delay = game_info.player_delays[responsible_player_id];
+        let empty_input = vec![0x00; responsible_delay * 2];
+        // Process dropped players' empty inputs first
+        // Note: Always use GameData for dropped players (can't use GameCache - we don't know their cache positions)
+        let mut all_outputs = Vec::new();
+        for (dropped_player_id, &is_dropped) in game_info.dropped_players.iter().enumerate() {
+            if is_dropped {
+                let dropped_outputs = sync_manager.process_client_input(
+                    dropped_player_id,
+                    simple_game_sync::ClientInput::GameData(empty_input.clone()),
+                );
+                all_outputs.extend(dropped_outputs);
+            }
+        }
         // Process input using SimpleGameSync
-        sync_manager.process_client_input(
+        let outputs = sync_manager.process_client_input(
             player_id,
             simple_game_sync::ClientInput::GameCache(cache_position),
-        )
+        );
+        all_outputs.extend(outputs);
+        all_outputs
     };
 
     // Send outputs to respective players
@@ -308,7 +356,9 @@ pub async fn handle_game_cache(
                 buf.put(data.as_slice());
                 (msg::GAME_DATA, buf.to_vec())
             }
-            simple_game_sync::ServerResponse::GameCache(position) => (msg::GAME_CACHE, vec![0x00, position]),
+            simple_game_sync::ServerResponse::GameCache(position) => {
+                (msg::GAME_CACHE, vec![0x00, position])
+            }
         };
 
         debug!(

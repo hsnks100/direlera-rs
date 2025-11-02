@@ -55,6 +55,7 @@ pub async fn handle_create_game(
         sync_manager: None, // Will be initialized when game starts
         player_addrs: vec![*src],
         player_delays: vec![conn_type as usize], // Use creator's connection_type as delay
+        dropped_players: vec![false],            // Creator is not dropped
     };
 
     // Add game

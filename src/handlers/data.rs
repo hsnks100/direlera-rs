@@ -167,4 +167,5 @@ pub struct GameInfo {
     pub player_addrs: Vec<std::net::SocketAddr>,
     // Player delays (indexed by player_id)
     pub player_delays: Vec<usize>,
+    pub dropped_players: Vec<bool>,
 }

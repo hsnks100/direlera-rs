@@ -49,6 +49,7 @@ pub async fn handle_join_game(
             game_info.num_players += 1;
             game_info.player_addrs.push(*src);
             game_info.player_delays.push(conn_type as usize);
+            game_info.dropped_players.push(false); // New player is not dropped
         } else {
             debug!(
                 { fields::GAME_ID } = game_id,

@@ -65,6 +65,7 @@ pub async fn handle_start_game(
         game_info.sync_manager = Some(simple_game_sync::SimpleGameSync::new_without_padding(
             delays,
         ));
+        game_info.dropped_players = vec![false; game_info.player_addrs.len()];
     })
     .await?;
 

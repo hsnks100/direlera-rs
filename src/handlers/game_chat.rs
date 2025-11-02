@@ -17,6 +17,21 @@ pub async fn handle_game_chat(
     let _empty = util::read_string(&mut buf);
     // NB: Message
     let chat_message = util::read_string(&mut buf);
+    // Filter out client-side control messages that contain 0x20 followed by 0x11 0x11...
+    // Pattern from packet dump: 00 20 11 11 11 11 11 00
+    // These are internal client messages and should not be broadcast
+    let message_bytes = chat_message.as_bytes();
+    let pattern = [0x20, 0x11, 0x11];
+    if message_bytes
+        .windows(pattern.len())
+        .any(|window| window == pattern)
+    {
+        debug!(
+            "Ignoring game chat message containing 0x20 0x11 0x11 pattern from {}",
+            src
+        );
+        return Ok(());
+    }
 
     // Get username and game ID
     let (username, game_id) = if let Some(client_info) = state.get_client(src).await {

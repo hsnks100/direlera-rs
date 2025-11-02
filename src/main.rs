@@ -332,7 +332,7 @@ async fn process_packet_in_session(
 
                     // Handle message and log errors without crashing
                     if let Err(e) = handle_message(message, &addr, global_state.clone()).await {
-                        error!(
+                        debug!(
                             { fields::MESSAGE_NUMBER } = msg_number,
                             { fields::MESSAGE_TYPE } = format!("0x{:02X}", msg_type),
                             { fields::ERROR } = %e,
