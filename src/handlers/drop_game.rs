@@ -41,14 +41,14 @@ pub async fn execute_drop_game(
     let username = client.username.clone();
 
     // Mark player as dropped and get outputs
-    let (was_playing, outputs) = {
+    let (was_playing, outputs, all_dropped, game_players) = {
         let mut games = state.games.write().await;
         let game_info = games.get_mut(&game_id).ok_or("Game not found")?;
 
         // Check if game is actually playing
-        let was_playing = game_info.game_status == 1;
+        let was_playing = game_info.game_status == GAME_STATUS_PLAYING;
 
-        let outputs = if was_playing {
+        let (outputs, all_dropped) = if was_playing {
             // Find dropper's player_id
             let dropper_player_id = game_info
                 .player_addrs
@@ -58,6 +58,9 @@ pub async fn execute_drop_game(
 
             // Mark player as dropped - other players will handle their empty inputs
             game_info.dropped_players[dropper_player_id] = true;
+
+            // Check if all players are now dropped
+            let all_dropped = game_info.dropped_players.iter().all(|&dropped| dropped);
 
             let outputs = if let Some(sync_manager) = &mut game_info.sync_manager {
                 let dropper_delay = sync_manager.get_player_delay(dropper_player_id);
@@ -80,21 +83,76 @@ pub async fn execute_drop_game(
                 { fields::USER_NAME } = username.as_str(),
                 { fields::GAME_ID } = game_id,
                 { fields::PLAYER_ID } = dropper_player_id,
-                "Player marked as dropped - game continues"
+                all_dropped = all_dropped,
+                "Player marked as dropped"
             );
 
-            outputs
+            (outputs, all_dropped)
         } else {
             info!(
                 { fields::USER_NAME } = username.as_str(),
                 { fields::GAME_ID } = game_id,
                 "Drop requested but game not playing"
             );
-            Vec::new()
+            (Vec::new(), false)
         };
 
-        (was_playing, outputs)
+        let game_players = game_info.player_addrs.clone();
+        (was_playing, outputs, all_dropped, game_players)
     };
+
+    // If all players dropped, send DROP_GAME notification for each player to all players
+    if all_dropped && was_playing {
+        info!(
+            { fields::GAME_ID } = game_id,
+            "All players dropped - ending game"
+        );
+
+        // Get all player usernames
+        let player_usernames: Vec<String> = {
+            let mut usernames = Vec::new();
+            for player_addr in &game_players {
+                if let Some(client) = state.get_client(player_addr).await {
+                    usernames.push(client.username);
+                } else {
+                    usernames.push(String::from("Unknown"));
+                }
+            }
+            usernames
+        };
+
+        // Send DROP_GAME notification for each dropped player
+        for (player_num, player_username) in player_usernames.iter().enumerate() {
+            let mut notification_data = BytesMut::new();
+            notification_data.put(player_username.as_bytes());
+            notification_data.put_u8(0); // Null terminator
+            notification_data.put_u8(player_num as u8);
+
+            // Send to all players in the game
+            for player_addr in &game_players {
+                util::send_packet(
+                    state,
+                    player_addr,
+                    msg::DROP_GAME,
+                    notification_data.to_vec(),
+                )
+                .await?;
+            }
+        }
+
+        // Update game status to Waiting
+        state
+            .update_game::<_, (), Box<dyn Error>>(game_id, |game_info| {
+                game_info.game_status = GAME_STATUS_WAITING;
+                Ok(())
+            })
+            .await?;
+
+        // Broadcast game status update to all users
+        let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
+        let status_data = util::make_update_game_status(&game_info)?;
+        util::broadcast_packet(state, msg::UPDATE_GAME_STATUS, status_data).await?;
+    }
 
     // Send outputs to remaining players
     if !outputs.is_empty() {

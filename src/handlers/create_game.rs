@@ -50,7 +50,7 @@ pub async fn handle_create_game(
         owner_user_id: user_id, // Store owner's user_id for authorization
         num_players: 1,
         max_players: 4,
-        game_status: 0, // Waiting
+        game_status: GAME_STATUS_WAITING,
         players,
         sync_manager: None, // Will be initialized when game starts
         player_addrs: vec![*src],

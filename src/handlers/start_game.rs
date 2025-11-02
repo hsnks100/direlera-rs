@@ -58,7 +58,7 @@ pub async fn handle_start_game(
 
     // Initialize SimpleGameSync when game starts
     util::with_game_mut(&state, src, |game_info| {
-        game_info.game_status = 1; // Playing
+        game_info.game_status = GAME_STATUS_PLAYING;
 
         // Initialize SimpleGameSync with player delays
         let delays = game_info.player_delays.clone();

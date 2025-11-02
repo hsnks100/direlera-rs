@@ -15,6 +15,12 @@ pub const PLAYER_STATUS_PLAYING: PlayerStatus = 0;
 pub const PLAYER_STATUS_IDLE: PlayerStatus = 1;
 pub const PLAYER_STATUS_NET_SYNC: PlayerStatus = 2;
 
+type GameStatus = u8;
+pub const GAME_STATUS_WAITING: GameStatus = 0;
+pub const GAME_STATUS_PLAYING: GameStatus = 1;
+#[allow(dead_code)]
+pub const GAME_STATUS_NETSYNC: GameStatus = 2;
+
 // AppState - centralized state with RwLock for efficiency
 pub struct AppState {
     // RwLock: multiple readers, exclusive writer
