@@ -31,19 +31,19 @@ pub struct PlayerOutput {
 
 /// FIFO cache with 256 slots (rolls over to 0 when full)
 #[derive(Debug, Clone)]
-struct InputCache {
+pub struct InputCache {
     slots: VecDeque<Vec<u8>>,
 }
 
 impl InputCache {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             slots: VecDeque::with_capacity(256),
         }
     }
 
     /// Find data in cache, returning the position if found
-    fn find(&self, data: &[u8]) -> Option<u8> {
+    pub fn find(&self, data: &[u8]) -> Option<u8> {
         self.slots
             .iter()
             .enumerate()
@@ -53,7 +53,7 @@ impl InputCache {
     }
 
     /// Add data to cache (rolls over at 256)
-    fn push(&mut self, data: Vec<u8>) {
+    pub fn push(&mut self, data: Vec<u8>) {
         if self.slots.len() >= 256 {
             self.slots.pop_front();
         }
@@ -61,7 +61,7 @@ impl InputCache {
     }
 
     /// Get data at position
-    fn get(&self, pos: u8) -> Option<&[u8]> {
+    pub fn get(&self, pos: u8) -> Option<&[u8]> {
         self.slots.get(pos as usize).map(|v| v.as_slice())
     }
 }
