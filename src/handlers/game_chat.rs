@@ -27,6 +27,11 @@ pub async fn handle_game_chat(
 
     if let Some(game_id) = game_id {
         info!("Game chat message: {}", chat_message);
+        let message_bytes = chat_message.as_bytes().to_vec();
+        if message_bytes.contains(&0x11) {
+            info!("skipping game chat message containing 0x15");
+            return Ok(());
+        }
 
         // Response creation
         let mut data = BytesMut::new();

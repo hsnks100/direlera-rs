@@ -27,6 +27,12 @@ pub struct UDPPacketGenerator {
     send_count: u16,
 }
 
+impl Default for UDPPacketGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UDPPacketGenerator {
     const MAX_RECENT_PACKETS: usize = 3;
 

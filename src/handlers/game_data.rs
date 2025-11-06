@@ -29,9 +29,9 @@ pub async fn handle_game_data(
     // Find player_id from address
     let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
     let player_id = game_info
-        .player_addrs
+        .players
         .iter()
-        .position(|addr| addr == src)
+        .position(|p| p.addr == *src)
         .ok_or("Player not in game")?;
 
     debug!(
@@ -60,8 +60,9 @@ pub async fn handle_game_data(
     };
 
     // Send outputs to respective players
+    let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
     for output in outputs {
-        let target_addr = &game_info.player_addrs[output.player_id];
+        let target_addr = &game_info.players[output.player_id].addr;
 
         let (message_type, data_to_send) = match output.response {
             simplest_game_sync::ServerResponse::GameData(data) => {

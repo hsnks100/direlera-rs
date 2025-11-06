@@ -14,13 +14,147 @@
 
 use std::collections::VecDeque;
 
-use crate::simple_game_sync::InputCache;
-
-// Re-export for convenience
-pub use crate::simple_game_sync::{ClientInput, ServerResponse};
+use tracing::warn;
 
 type InputData = Vec<u8>;
-const MINIMUM_INPUT_SIZE: usize = 2;
+type OneInput = Vec<u8>;
+
+/// Client input message type
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClientInput {
+    /// Game Data: contains the actual input bytes
+    GameData(Vec<u8>),
+    /// Game Cache: references a position in the client's cache
+    GameCache(u8),
+}
+
+/// Server response message type
+#[derive(Debug, Clone, PartialEq)]
+pub enum ServerResponse {
+    /// Game Data: contains the full combined input bytes
+    GameData(Vec<u8>),
+    /// Game Cache: references a position in the server's cache
+    GameCache(u8),
+}
+
+/// FIFO cache with 256 slots (rolls over to 0 when full)
+#[derive(Debug, Clone)]
+pub struct InputCache {
+    slots: VecDeque<Vec<u8>>,
+}
+
+impl Default for InputCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl InputCache {
+    pub fn new() -> Self {
+        Self {
+            slots: VecDeque::with_capacity(256),
+        }
+    }
+
+    /// Find data in cache, returning the position if found
+    pub fn find(&self, data: &[u8]) -> Option<u8> {
+        self.slots
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, cached)| cached.as_slice() == data)
+            .map(|(idx, _)| idx as u8)
+    }
+
+    /// Add data to cache (rolls over at 256)
+    pub fn push(&mut self, data: Vec<u8>) {
+        if self.slots.len() >= 256 {
+            self.slots.pop_front();
+        }
+        self.slots.push_back(data);
+    }
+
+    /// Get data at position
+    pub fn get(&self, pos: u8) -> Option<&[u8]> {
+        self.slots.get(pos as usize).map(|v| v.as_slice())
+    }
+}
+
+/// Per-player input state
+#[derive(Debug, Clone)]
+struct PlayerInput {
+    /// Input frames (2-byte chunks)
+    frames: Vec<Vec<u8>>,
+    /// Client's input cache
+    client_cache: InputCache,
+    /// Expected input size (delay * 2)
+    input_size: usize,
+    /// Delay value
+    delay: usize,
+    /// Number of frames already distributed to send buffers
+    distributed_count: usize,
+}
+
+impl PlayerInput {
+    fn new(delay: usize) -> Self {
+        Self {
+            frames: Vec::new(),
+            client_cache: InputCache::new(),
+            input_size: delay * 2,
+            delay,
+            distributed_count: 0,
+        }
+    }
+
+    /// Add input (splits into 2-byte chunks)
+    fn add_input(&mut self, data: Vec<u8>) {
+        for chunk in data.chunks(2) {
+            if chunk.len() == 2 {
+                self.frames.push(chunk.to_vec());
+            }
+        }
+    }
+}
+
+/// Per-player output state
+#[derive(Debug, Clone)]
+struct PlayerOutputState {
+    /// Send buffer: holds frames to send to this player
+    /// Each sub-vec is for one source player's frames
+    send_buffers: Vec<VecDeque<Vec<u8>>>,
+    /// Output cache (combined data this player has received)
+    output_cache: InputCache,
+    /// Delay value
+    delay: usize,
+}
+
+impl PlayerOutputState {
+    fn new(player_count: usize, delay: usize) -> Self {
+        Self {
+            send_buffers: (0..player_count).map(|_| VecDeque::new()).collect(),
+            output_cache: InputCache::new(),
+            delay,
+        }
+    }
+
+    /// Check if ready to send
+    fn can_send(&self) -> bool {
+        self.send_buffers.iter().all(|buf| buf.len() >= self.delay)
+    }
+
+    /// Extract and combine frames
+    fn extract_combined(&mut self) -> Vec<u8> {
+        let mut combined = Vec::new();
+        for _ in 0..self.delay {
+            for buf in &mut self.send_buffers {
+                if let Some(frame) = buf.pop_front() {
+                    combined.extend_from_slice(&frame);
+                }
+            }
+        }
+        combined
+    }
+}
 
 /// Error types for game sync operations
 #[derive(Debug, Clone, PartialEq)]
@@ -74,10 +208,11 @@ pub struct CachedPlayerOutput {
 }
 #[derive(Debug, Clone)]
 pub struct SimplestGameSync {
-    input_buffers: Vec<VecDeque<InputData>>,
-    output_buffers: Vec<VecDeque<u8>>,
+    player_input: Vec<VecDeque<OneInput>>,
+    sender_buffer: Vec<VecDeque<OneInput>>,
     player_delays: Vec<usize>,
     dropped_players: Vec<bool>,
+    game_data_size: usize,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -85,14 +220,16 @@ pub struct PlayerOutput {
     pub player_id: usize,
     pub output: Vec<u8>,
 }
+
 impl SimplestGameSync {
     pub fn new(player_delays: Vec<usize>) -> Self {
         let player_count = player_delays.len();
         Self {
-            input_buffers: vec![VecDeque::new(); player_count],
-            output_buffers: vec![VecDeque::new(); player_count],
+            player_input: vec![VecDeque::new(); player_count],
+            sender_buffer: vec![VecDeque::new(); player_count],
             player_delays,
             dropped_players: vec![false; player_count],
+            game_data_size: 0,
         }
     }
 
@@ -102,65 +239,38 @@ impl SimplestGameSync {
         input: InputData,
     ) -> Result<Vec<PlayerOutput>, GameSyncError> {
         // Validate player_id
-        if player_id >= self.input_buffers.len() {
+        if player_id >= self.player_input.len() {
             return Err(GameSyncError::InvalidPlayerId {
                 player_id,
-                player_count: self.input_buffers.len(),
+                player_count: self.player_input.len(),
             });
         }
 
-        // split input into 2-byte chunks
-        for chunk in input.chunks(MINIMUM_INPUT_SIZE) {
-            if chunk.len() == MINIMUM_INPUT_SIZE {
-                self.input_buffers[player_id].push_back(chunk.to_vec());
-            }
+        // Drop된 플레이어가 입력을 보내면 처리하지 않음
+        if self.dropped_players[player_id] {
+            warn!("Player {} is dropped, skipping input", player_id);
+            return Ok(Vec::new());
         }
-        let mut results = Vec::new();
-        // process bundles while all input buffers have at least one item (or player is dropped)
-        while self
-            .input_buffers
-            .iter()
-            .enumerate()
-            .all(|(i, buffer)| !buffer.is_empty() || self.dropped_players[i])
-        {
-            // Before creating bundle, fill empty buffers for dropped players with [0x00, 0x00]
-            for (player_id, buffer) in self.input_buffers.iter_mut().enumerate() {
-                if self.dropped_players[player_id] && buffer.is_empty() {
-                    buffer.push_back(vec![0x00, 0x00]);
-                }
-            }
-            // create a bundle by taking one item from each input buffer
-            let mut bundle = Vec::with_capacity(self.input_buffers.len());
-            for buffer in &mut self.input_buffers {
-                // Safe to unwrap here because we checked all buffers are non-empty or dropped
-                if let Some(item) = buffer.pop_front() {
-                    bundle.push(item);
-                } else {
-                    return Err(GameSyncError::BufferInconsistency {
-                        message: "Buffer became empty during bundle creation".to_string(),
-                    });
-                }
-            }
-            // serialize bundle into a single Vec<u8> for storage
-            let serialized_bundle: InputData = bundle.into_iter().flatten().collect();
-            // add the bundle to all output buffers
-            for output_buffer in &mut self.output_buffers {
-                output_buffer.extend(serialized_bundle.clone());
-            }
 
-            // Check for outputs after each bundle creation
-            // This ensures players with smaller delays get outputs immediately
-            for player_id in 0..self.player_delays.len() {
-                let required_size =
-                    self.player_delays[player_id] * self.player_delays.len() * MINIMUM_INPUT_SIZE;
-                while self.output_buffers[player_id].len() >= required_size {
-                    let output = self.output_buffers[player_id]
-                        .drain(..required_size)
-                        .collect::<Vec<u8>>();
-                    results.push(PlayerOutput { player_id, output });
+        // 입력을 delay로 나눠서 청크 생성 (2바이트 제약 제거!)
+        let delay = self.player_delays[player_id];
+        if delay > 0 && !input.is_empty() {
+            let chunk_size = input.len() / delay;
+            if chunk_size > 0 {
+                // 첫 입력에서 game_data_size 설정
+                if self.game_data_size == 0 {
+                    self.game_data_size = chunk_size;
+                }
+
+                for chunk in input.chunks(chunk_size) {
+                    self.player_input[player_id].push_back(chunk.to_vec());
                 }
             }
         }
+
+        // Drain ready inputs and collect outputs
+        let results = self.drain_ready_inputs()?;
+
         Ok(results)
     }
 
@@ -169,21 +279,90 @@ impl SimplestGameSync {
         &self.player_delays
     }
 
-    /// Mark a player as dropped
-    pub fn mark_player_dropped(&mut self, player_id: usize) -> Result<(), GameSyncError> {
+    /// Drain ready inputs (all players have input or are dropped) and process them
+    /// This can be called without new input to check if drop events allow sending data
+    pub fn drain_ready_inputs(&mut self) -> Result<Vec<PlayerOutput>, GameSyncError> {
+        let mut results = Vec::new();
+
+        // 모든 플레이어의 입력이 있는지 확인 (드롭된 플레이어 제외)
+        while {
+            let all_ready = self
+                .player_input
+                .iter()
+                .enumerate()
+                .all(|(i, buffer)| !buffer.is_empty() || self.dropped_players[i]);
+            let has_any_input = self.player_input.iter().any(|buffer| !buffer.is_empty());
+            all_ready && has_any_input
+        } {
+            // 각 플레이어로부터 하나씩 입력 추출
+            // drop된 플레이어는 0으로 채운 데이터 생성
+            let extract_inputs: Vec<OneInput> = self
+                .player_input
+                .iter_mut()
+                .enumerate()
+                .filter_map(|(i, q)| {
+                    q.pop_front().or_else(|| {
+                        if self.dropped_players[i] {
+                            Some(vec![0u8; self.game_data_size])
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect();
+
+            // 모든 sender_buffer에 추출된 입력들을 추가
+            for buffer in &mut self.sender_buffer {
+                buffer.extend(extract_inputs.clone());
+            }
+
+            // 각 플레이어의 sender_buffer 확인 후 전송
+            let players = self.player_delays.len();
+            for (pid, buffer) in self.sender_buffer.iter_mut().enumerate() {
+                // 필요한 개수 = delay * players (OneInput 개수)
+                let require_len = self.player_delays[pid] * players;
+
+                while buffer.len() >= require_len {
+                    // OneInput들을 drain해서 flatten
+                    let output: Vec<u8> = buffer.drain(..require_len).flatten().collect();
+                    results.push(PlayerOutput {
+                        player_id: pid,
+                        output,
+                    });
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Mark a player as dropped and drain any ready inputs
+    /// Returns any outputs that can now be sent due to the drop
+    pub fn mark_player_dropped(
+        &mut self,
+        player_id: usize,
+    ) -> Result<Vec<PlayerOutput>, GameSyncError> {
         if player_id >= self.dropped_players.len() {
             return Err(GameSyncError::InvalidPlayerId {
                 player_id,
                 player_count: self.dropped_players.len(),
             });
         }
+        println!("Marking player {} as dropped", player_id);
         self.dropped_players[player_id] = true;
-        Ok(())
+
+        // 드롭이 발생했으므로 보낼 수 있는 상태인지 체크하고 처리
+        self.drain_ready_inputs()
     }
 
     /// Check if a player is dropped
     pub fn is_player_dropped(&self, player_id: usize) -> bool {
         player_id < self.dropped_players.len() && self.dropped_players[player_id]
+    }
+
+    /// Check if all players are dropped
+    pub fn all_players_dropped(&self) -> bool {
+        self.dropped_players.iter().all(|&dropped| dropped)
     }
 }
 
@@ -191,7 +370,7 @@ impl SimplestGameSync {
 #[derive(Debug, Clone)]
 pub struct CachedGameSync {
     /// Core sync engine without cache
-    sync: SimplestGameSync,
+    pub sync: SimplestGameSync,
     /// Per-player input caches (client-side cache)
     input_caches: Vec<InputCache>,
     /// Per-player output caches (server-side cache)
@@ -233,7 +412,7 @@ impl CachedGameSync {
             }
             ClientInput::GameCache(pos) => self.input_caches[player_id]
                 .get(pos)
-                .ok_or_else(|| GameSyncError::CachePositionNotFound {
+                .ok_or(GameSyncError::CachePositionNotFound {
                     player_id,
                     position: pos,
                 })?
@@ -276,9 +455,35 @@ impl CachedGameSync {
         self.sync.player_delays()[player_id]
     }
 
-    /// Mark a player as dropped
-    pub fn mark_player_dropped(&mut self, player_id: usize) -> Result<(), GameSyncError> {
-        self.sync.mark_player_dropped(player_id)
+    /// Mark a player as dropped and drain any ready inputs
+    /// Returns any outputs that can now be sent due to the drop
+    pub fn mark_player_dropped(
+        &mut self,
+        player_id: usize,
+    ) -> Result<Vec<CachedPlayerOutput>, GameSyncError> {
+        let raw_outputs = self.sync.mark_player_dropped(player_id)?;
+
+        // Convert outputs to cached responses
+        let mut results = Vec::new();
+        for raw_output in raw_outputs {
+            let cached_output = if let Some(cache_pos) =
+                self.output_caches[raw_output.player_id].find(&raw_output.output)
+            {
+                // Found in cache - use cache reference
+                ServerResponse::GameCache(cache_pos)
+            } else {
+                // Not in cache - store and return full data
+                self.output_caches[raw_output.player_id].push(raw_output.output.clone());
+                ServerResponse::GameData(raw_output.output)
+            };
+
+            results.push(CachedPlayerOutput {
+                player_id: raw_output.player_id,
+                response: cached_output,
+            });
+        }
+
+        Ok(results)
     }
 
     /// Check if a player is dropped
@@ -335,6 +540,29 @@ mod tests {
         assert_eq!(outputs.len(), 2);
         assert!(matches!(outputs[0].response, ServerResponse::GameCache(_)));
         assert!(matches!(outputs[1].response, ServerResponse::GameCache(_)));
+    }
+    #[test]
+    fn test_equal_delays_drop() {
+        let mut manager = CachedGameSync::new(vec![1, 1]);
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0x01, 0x02, 0x03]))
+            .unwrap();
+        let outputs = manager
+            .process_client_input(1, ClientInput::GameData(vec![0x04, 0x05, 0x06]))
+            .unwrap();
+        assert_eq!(
+            outputs,
+            vec![
+                CachedPlayerOutput {
+                    player_id: 0,
+                    response: ServerResponse::GameData(vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06])
+                },
+                CachedPlayerOutput {
+                    player_id: 1,
+                    response: ServerResponse::GameData(vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06])
+                },
+            ]
+        )
     }
 
     #[test]
@@ -659,5 +887,90 @@ mod tests {
     fn test_player_count() {
         let manager = CachedGameSync::new(vec![1, 1, 1]);
         assert_eq!(manager.player_count(), 3);
+    }
+
+    #[test]
+    fn test_game_data_size() {
+        let mut manager = CachedGameSync::new(vec![1, 1]);
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0x01, 0x02]))
+            .unwrap();
+        assert_eq!(manager.sync.game_data_size, 2);
+    }
+
+    #[test]
+    fn test_game_data_size_with_different_delays() {
+        let mut manager = CachedGameSync::new(vec![1, 2]);
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0x01, 0x02]))
+            .unwrap();
+        let result = manager
+            .process_client_input(1, ClientInput::GameData(vec![0x03, 0x04, 0x05, 0x06]))
+            .unwrap();
+        assert_eq!(
+            result,
+            vec![CachedPlayerOutput {
+                player_id: 0,
+                response: ServerResponse::GameData(vec![0x01, 0x02, 0x03, 0x04])
+            }]
+        );
+        let result = manager
+            .process_client_input(0, ClientInput::GameData(vec![0x07, 0x08]))
+            .unwrap();
+        assert_eq!(
+            result,
+            vec![
+                CachedPlayerOutput {
+                    player_id: 0,
+                    response: ServerResponse::GameData(vec![0x07, 0x08, 0x05, 0x06])
+                },
+                CachedPlayerOutput {
+                    player_id: 1,
+                    response: ServerResponse::GameData(vec![
+                        0x01, 0x02, 0x03, 0x04, 0x07, 0x08, 0x05, 0x06
+                    ])
+                },
+            ]
+        );
+    }
+    #[test]
+    fn test_game_data_size_drop() {
+        let mut manager = CachedGameSync::new(vec![1, 1]);
+        manager
+            .process_client_input(0, ClientInput::GameData(vec![0x01, 0x02]))
+            .unwrap();
+        manager.mark_player_dropped(0).unwrap();
+        let result = manager
+            .process_client_input(1, ClientInput::GameData(vec![0x03, 0x04]))
+            .unwrap();
+        assert_eq!(
+            result,
+            vec![
+                CachedPlayerOutput {
+                    player_id: 0,
+                    response: ServerResponse::GameData(vec![0x01, 0x02, 0x03, 0x04])
+                },
+                CachedPlayerOutput {
+                    player_id: 1,
+                    response: ServerResponse::GameData(vec![0x01, 0x02, 0x03, 0x04])
+                },
+            ]
+        );
+        let result = manager
+            .process_client_input(1, ClientInput::GameData(vec![0x05, 0x06]))
+            .unwrap();
+        assert_eq!(
+            result,
+            vec![
+                CachedPlayerOutput {
+                    player_id: 0,
+                    response: ServerResponse::GameData(vec![0, 0, 5, 6]),
+                },
+                CachedPlayerOutput {
+                    player_id: 1,
+                    response: ServerResponse::GameData(vec![0, 0, 5, 6])
+                },
+            ]
+        )
     }
 }

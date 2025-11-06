@@ -81,13 +81,10 @@ pub async fn handle_quit_game(
                 return Ok(());
             }
         };
-        game_info.players.remove(src);
-        game_info.num_players -= 1;
-
-        // Remove from player_addrs and player_delays
-        if let Some(idx) = game_info.player_addrs.iter().position(|addr| addr == src) {
-            game_info.player_addrs.remove(idx);
-            game_info.player_delays.remove(idx);
+        // Remove from players
+        if let Some(idx) = game_info.players.iter().position(|p| p.addr == *src) {
+            game_info.players.remove(idx);
+            game_info.num_players -= 1;
         }
 
         game_info.clone()
@@ -112,8 +109,8 @@ pub async fn handle_quit_game(
         state.remove_game(game_info_clone.game_id).await;
 
         // Update remaining players' status
-        for player_addr in game_info_clone.players.iter() {
-            util::with_client_mut(&state, player_addr, |client_info| {
+        for player in &game_info_clone.players {
+            util::with_client_mut(&state, &player.addr, |client_info| {
                 client_info.game_id = None;
                 client_info.player_status = PLAYER_STATUS_IDLE;
             })
@@ -127,12 +124,12 @@ pub async fn handle_quit_game(
         util::broadcast_packet(&state, msg::CLOSE_GAME, data.to_vec()).await?;
 
         // Quit game notification
-        for player_addr in game_info_clone.players.iter() {
+        for player in &game_info_clone.players {
             let mut data = BytesMut::new();
             data.put(username.as_bytes());
             data.put_u8(0);
             data.put_u16_le(user_id);
-            util::send_packet(&state, player_addr, msg::QUIT_GAME, data.to_vec()).await?;
+            util::send_packet(&state, &player.addr, msg::QUIT_GAME, data.to_vec()).await?;
         }
     } else {
         info!(
@@ -146,12 +143,12 @@ pub async fn handle_quit_game(
         let status_data = util::make_update_game_status(&game_info_clone)?;
         util::broadcast_packet(&state, msg::UPDATE_GAME_STATUS, status_data).await?;
 
-        for player_addr in game_info_clone.players.iter() {
+        for player in &game_info_clone.players {
             let mut data = BytesMut::new();
             data.put(username.as_bytes());
             data.put_u8(0);
             data.put_u16_le(user_id);
-            util::send_packet(&state, player_addr, msg::QUIT_GAME, data.to_vec()).await?;
+            util::send_packet(&state, &player.addr, msg::QUIT_GAME, data.to_vec()).await?;
         }
     }
     Ok(())

@@ -17,8 +17,6 @@ use handlers::*;
 
 mod session_manager;
 
-mod game_sync;
-mod simple_game_sync;
 mod simplest_game_sync;
 use handlers::data::*;
 use session_manager::SessionManager;
@@ -279,33 +277,6 @@ async fn process_packet_in_session(
     addr: std::net::SocketAddr,
     global_state: Arc<AppState>,
 ) {
-    // Get client info for packet span
-    let client_info = global_state.get_client(&addr).await;
-
-    let span = if let Some(ref client) = client_info {
-        if let Some(game_id) = client.game_id {
-            tracing::info_span!(
-                "packet",
-                { fields::USER_NAME } = %client.username,
-                { fields::USER_ID } = client.user_id,
-                { fields::GAME_ID } = game_id,
-                { fields::CONNECTION_TYPE } = client.conn_type,
-                ping = client.ping,
-            )
-        } else {
-            tracing::info_span!(
-                "packet",
-                { fields::USER_NAME } = %client.username,
-                { fields::USER_ID } = client.user_id,
-                { fields::CONNECTION_TYPE } = client.conn_type,
-                ping = client.ping,
-            )
-        }
-    } else {
-        tracing::info_span!("packet")
-    };
-    let _enter = span.enter();
-
     debug!("Processing packet");
 
     // Parse and handle messages
