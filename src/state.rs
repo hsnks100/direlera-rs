@@ -137,8 +137,8 @@ impl AppState {
 #[derive(Debug, Clone)]
 pub struct ClientInfo {
     pub session_id: Uuid,
-    pub username: String,
-    pub emulator_name: String,
+    pub username: Vec<u8>, // Store as bytes to preserve original encoding (CP949, etc.)
+    pub emulator_name: Vec<u8>, // Store as bytes to preserve original encoding
     pub conn_type: u8,
     pub user_id: u16,
     pub ping: u32,
@@ -151,6 +151,32 @@ pub struct ClientInfo {
     pub packet_generator: crate::kaillera::protocol::UDPPacketGenerator,
 }
 
+impl ClientInfo {
+    #[allow(dead_code)]
+    /// Get username as String (for logging/display, uses lossy conversion)
+    pub fn username_str(&self) -> String {
+        String::from_utf8_lossy(&self.username).to_string()
+    }
+
+    #[allow(dead_code)]
+    /// Get emulator name as String (for logging/display, uses lossy conversion)
+    pub fn emulator_name_str(&self) -> String {
+        String::from_utf8_lossy(&self.emulator_name).to_string()
+    }
+
+    #[allow(dead_code)]
+    /// Get username for logging (safe display - shows ASCII and hex for non-ASCII)
+    pub fn username_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.username)
+    }
+
+    #[allow(dead_code)]
+    /// Get emulator name for logging (safe display)
+    pub fn emulator_name_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.emulator_name)
+    }
+}
+
 pub const GAME_STATUS_WAITING: u8 = 0;
 pub const GAME_STATUS_PLAYING: u8 = 1;
 #[allow(dead_code)]
@@ -161,18 +187,32 @@ pub const GAME_STATUS_NET_SYNC: u8 = 2;
 #[derive(Debug, Clone)]
 pub struct GamePlayerInfo {
     pub addr: std::net::SocketAddr,
-    pub username: String,
+    pub username: Vec<u8>, // Store as bytes to preserve original encoding
     pub user_id: u16,
     pub conn_type: u8,
+}
+
+impl GamePlayerInfo {
+    #[allow(dead_code)]
+    /// Get username as String (for logging/display, uses lossy conversion)
+    pub fn username_str(&self) -> String {
+        String::from_utf8_lossy(&self.username).to_string()
+    }
+
+    /// Get username for logging (safe display)
+    #[allow(dead_code)]
+    pub fn username_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.username)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct GameInfo {
     pub game_id: u32,
-    pub game_name: String,
-    pub emulator_name: String,
-    pub owner: String,      // Display name (for backward compatibility)
-    pub owner_user_id: u16, // Owner's user_id for authorization checks
+    pub game_name: Vec<u8>,     // Store as bytes to preserve original encoding
+    pub emulator_name: Vec<u8>, // Store as bytes to preserve original encoding
+    pub owner: Vec<u8>,         // Store as bytes to preserve original encoding
+    pub owner_user_id: u16,     // Owner's user_id for authorization checks
     pub num_players: u8,
     pub max_players: u8,
     pub game_status: u8, // 0=Waiting, 1=Playing, 2=Netsync
@@ -180,4 +220,42 @@ pub struct GameInfo {
     pub players: Vec<GamePlayerInfo>,
     // New: SimpleGameSync for frame synchronization
     pub sync_manager: Option<simplest_game_sync::CachedGameSync>,
+}
+
+impl GameInfo {
+    #[allow(dead_code)]
+    /// Get game name as String (for logging/display, uses lossy conversion)
+    pub fn game_name_str(&self) -> String {
+        String::from_utf8_lossy(&self.game_name).to_string()
+    }
+
+    /// Get emulator name as String (for logging/display, uses lossy conversion)
+    #[allow(dead_code)]
+    pub fn emulator_name_str(&self) -> String {
+        String::from_utf8_lossy(&self.emulator_name).to_string()
+    }
+
+    /// Get owner name as String (for logging/display, uses lossy conversion)
+    #[allow(dead_code)]
+    pub fn owner_str(&self) -> String {
+        String::from_utf8_lossy(&self.owner).to_string()
+    }
+
+    /// Get game name for logging (safe display)
+    #[allow(dead_code)]
+    pub fn game_name_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.game_name)
+    }
+
+    /// Get emulator name for logging (safe display)
+    #[allow(dead_code)]
+    pub fn emulator_name_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.emulator_name)
+    }
+
+    /// Get owner name for logging (safe display)
+    #[allow(dead_code)]
+    pub fn owner_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.owner)
+    }
 }

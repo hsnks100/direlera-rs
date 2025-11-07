@@ -15,28 +15,39 @@ pub async fn handle_user_login(
 ) -> color_eyre::Result<()> {
     let mut buf = BytesMut::from(&message.data[..]);
 
-    // NB: Username
-    let username = util::read_string(&mut buf);
-    // NB: Emulator Name
-    let emulator_name = util::read_string(&mut buf);
+    // NB: Username (read as bytes to preserve encoding)
+    let mut username = util::read_string_bytes(&mut buf);
+    // NB: Emulator Name (read as bytes to preserve encoding)
+    let emulator_name = util::read_string_bytes(&mut buf);
     // 1B: Connection Type
     let conn_type = if !buf.is_empty() { buf.get_u8() } else { 0 };
+
+    // Validate username length (31 bytes max - not characters, to preserve encoding)
+    if username.len() > 31 {
+        use tracing::warn;
+        warn!(
+            username_len = username.len(),
+            "Username too long, truncating to 31 bytes"
+        );
+        // Truncate to 31 bytes
+        username.truncate(31);
+    }
 
     // Lock-free ID generation
     let user_id = state.next_user_id();
 
     info!(
-        { fields::USER_NAME } = username.as_str(),
+        { fields::USER_NAME } = util::bytes_for_log(&username).as_str(),
         { fields::USER_ID } = user_id,
-        emulator = emulator_name.as_str(),
+        emulator = util::bytes_for_log(&emulator_name).as_str(),
         { fields::CONNECTION_TYPE } = conn_type,
         "User logged in"
     );
 
     let client = ClientInfo {
         session_id: Uuid::new_v4(),
-        username: username.clone(),
-        emulator_name: emulator_name.clone(),
+        username,
+        emulator_name,
         conn_type,
         user_id,
         ping: 0,
@@ -74,18 +85,18 @@ pub async fn handle_user_quit(
     let mut buf = BytesMut::from(&message.data[..]);
 
     // NB: Empty String
-    let _empty = util::read_string(&mut buf);
+    let _empty = util::read_string_bytes(&mut buf);
     // 2B: 0xFF
     let _code = if buf.len() >= 2 { buf.get_u16_le() } else { 0 };
-    // NB: Message
-    let user_message = util::read_string(&mut buf);
+    // NB: Message (read as bytes to preserve encoding)
+    let user_message = util::read_string_bytes(&mut buf);
 
     // Handle quit game first
     super::game::handle_quit_game(vec![0x00, 0xFF, 0xFF], src, state.clone()).await?;
 
     // Remove client from list
     if let Some(client_info) = state.remove_client(src).await {
-        info!("User quit: {}", user_message);
+        info!("User quit: {}", String::from_utf8_lossy(&user_message));
         let data = packet_util::build_user_quit_packet(
             &client_info.username,
             client_info.user_id,
@@ -93,7 +104,10 @@ pub async fn handle_user_quit(
         );
         util::broadcast_packet(&state, msg::USER_QUIT, data).await?;
     } else {
-        debug!(quit_message = user_message.as_str(), "Unknown client quit");
+        debug!(
+            quit_message = String::from_utf8_lossy(&user_message).as_ref(),
+            "Unknown client quit"
+        );
     }
     Ok(())
 }

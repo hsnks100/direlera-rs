@@ -15,18 +15,21 @@ pub async fn handle_global_chat(
     let mut buf = BytesMut::from(&message.data[..]);
 
     // NB: Empty String
-    let _empty = util::read_string(&mut buf);
-    // NB: Message
-    let chat_message = util::read_string(&mut buf);
+    let _empty = util::read_string_bytes(&mut buf);
+    // NB: Message (read as bytes to preserve encoding)
+    let chat_message = util::read_string_bytes(&mut buf);
 
     // Get username from clients list
     let username = if let Some(client_info) = state.get_client(src).await {
         client_info.username.clone()
     } else {
-        "Unknown".to_string()
+        b"Unknown".to_vec()
     };
 
-    info!("Global chat message: {}", chat_message);
+    info!(
+        "Global chat message: {}",
+        String::from_utf8_lossy(&chat_message)
+    );
 
     // Server notification creation
     let data = packet_util::build_global_chat_packet(&username, &chat_message);
@@ -47,9 +50,9 @@ pub async fn handle_game_chat(
     let mut buf = BytesMut::from(&message.data[..]);
 
     // NB: Empty String
-    let _empty = util::read_string(&mut buf);
-    // NB: Message
-    let chat_message = util::read_string(&mut buf);
+    let _empty = util::read_string_bytes(&mut buf);
+    // NB: Message (read as bytes to preserve encoding)
+    let chat_message = util::read_string_bytes(&mut buf);
 
     // Check if client exists and is in a game
     let client_info = state
@@ -60,14 +63,31 @@ pub async fn handle_game_chat(
         .game_id
         .ok_or_else(|| eyre!("Client attempted game chat but not in a game"))?;
 
+    // Verify user is actually in the game's players list
+    let game_info = state
+        .get_game(game_id)
+        .await
+        .ok_or_else(|| eyre!("Game not found"))?;
+    if !game_info.players.iter().any(|p| p.addr == *src) {
+        use tracing::warn;
+        warn!(
+            { fields::USER_NAME } = client_info.username_str().as_str(),
+            { fields::GAME_ID } = game_id,
+            "User attempted game chat but not in game players list"
+        );
+        return Ok(()); // Silently ignore invalid request
+    }
+
     // Validate message content
-    let message_bytes = chat_message.as_bytes();
-    if message_bytes.contains(&0x11) {
+    if chat_message.contains(&0x11) {
         info!("skipping game chat message containing 0x11");
         return Ok(());
     }
 
-    info!("Game chat message: {}", chat_message);
+    info!(
+        "Game chat message: {}",
+        String::from_utf8_lossy(&chat_message)
+    );
 
     // Build and broadcast packet to all players in the game
     let data = packet_util::build_game_chat_packet(&client_info.username, &chat_message);
