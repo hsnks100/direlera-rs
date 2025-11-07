@@ -5,13 +5,6 @@
 
 // logic description
 
-// 1.  **동시 입력 대기:** 시스템은 **모든 플레이어(P1, P2, P3)**의 인풋 버퍼에 값이 채워지기를 기다립니다. 하나라도 누락되면 다음 단계로 넘어가지 않습니다.
-// 2.  **묶음 생성 및 이동:** 모든 인풋이 확인되면, 이들을 하나의 **인풋 묶음(Bundle)**으로 만듭니다.
-// 3.  **전송 버퍼 누적:** 생성된 인풋 묶음은 **모든 플레이어의 전송 버퍼**에 **동일하게** 추가되어 누적됩니다. 이후 인풋 버퍼는 비워집니다.
-// 4.  **전송 가능 확인:** 각 플레이어 $P_i$ 마다, 자신의 전송 버퍼에 누적된 묶음의 개수가 미리 정해진 **최소 전송 단위**($N_i$)에 도달했는지 확인합니다.
-// 5.  **데이터 전송:** $N_i$를 충족한 플레이어에게는 버퍼에 누적된 **전체 인풋 묶음**을 전송(리턴)합니다.
-// 6.  **버퍼 초기화:** 전송이 완료된 해당 플레이어의 전송 버퍼는 **즉시 비워집니다.**
-
 use std::collections::VecDeque;
 
 use tracing::warn;
@@ -41,12 +34,6 @@ pub enum ServerResponse {
 #[derive(Debug, Clone)]
 pub struct InputCache {
     slots: VecDeque<Vec<u8>>,
-}
-
-impl Default for InputCache {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl InputCache {
@@ -350,8 +337,6 @@ impl SimplestGameSync {
         }
         println!("Marking player {} as dropped", player_id);
         self.dropped_players[player_id] = true;
-
-        // 드롭이 발생했으므로 보낼 수 있는 상태인지 체크하고 처리
         self.drain_ready_inputs()
     }
 
@@ -412,7 +397,7 @@ impl CachedGameSync {
             }
             ClientInput::GameCache(pos) => self.input_caches[player_id]
                 .get(pos)
-                .ok_or(GameSyncError::CachePositionNotFound {
+                .ok_or_else(|| GameSyncError::CachePositionNotFound {
                     player_id,
                     position: pos,
                 })?

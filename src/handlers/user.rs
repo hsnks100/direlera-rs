@@ -1,0 +1,99 @@
+use bytes::{Buf, BytesMut};
+use std::sync::Arc;
+use std::time::Instant;
+use tracing::info;
+use uuid::Uuid;
+
+use super::util;
+use crate::kaillera::message_types as msg;
+use crate::*;
+
+pub async fn handle_user_login(
+    message: kaillera::protocol::ParsedMessage,
+    src: &std::net::SocketAddr,
+    state: Arc<AppState>,
+) -> color_eyre::Result<()> {
+    let mut buf = BytesMut::from(&message.data[..]);
+
+    // NB: Username
+    let username = util::read_string(&mut buf);
+    // NB: Emulator Name
+    let emulator_name = util::read_string(&mut buf);
+    // 1B: Connection Type
+    let conn_type = if !buf.is_empty() { buf.get_u8() } else { 0 };
+
+    // Lock-free ID generation
+    let user_id = state.next_user_id();
+
+    info!(
+        { fields::USER_NAME } = username.as_str(),
+        { fields::USER_ID } = user_id,
+        emulator = emulator_name.as_str(),
+        { fields::CONNECTION_TYPE } = conn_type,
+        "User logged in"
+    );
+
+    let client = ClientInfo {
+        session_id: Uuid::new_v4(),
+        username: username.clone(),
+        emulator_name: emulator_name.clone(),
+        conn_type,
+        user_id,
+        ping: 0,
+        player_status: PLAYER_STATUS_IDLE,
+        game_id: None,
+        last_ping_time: Some(Instant::now()),
+        ack_count: 0,
+        packet_generator: kaillera::protocol::UDPPacketGenerator::new(),
+    };
+
+    // Encapsulated method
+    state.add_client(*src, client).await;
+
+    // Prepare response data
+    let data = packet_util::build_server_to_client_ack_packet();
+
+    // Send response
+    util::send_packet(&state, src, msg::SERVER_TO_CLIENT_ACK, data).await?;
+
+    Ok(())
+}
+
+/*
+'            Server Notification:
+'            NB : Username
+'            2B : UserID
+'            NB : Message
+ */
+pub async fn handle_user_quit(
+    message: kaillera::protocol::ParsedMessage,
+    src: &std::net::SocketAddr,
+    state: Arc<AppState>,
+) -> color_eyre::Result<()> {
+    use tracing::debug;
+    let mut buf = BytesMut::from(&message.data[..]);
+
+    // NB: Empty String
+    let _empty = util::read_string(&mut buf);
+    // 2B: 0xFF
+    let _code = if buf.len() >= 2 { buf.get_u16_le() } else { 0 };
+    // NB: Message
+    let user_message = util::read_string(&mut buf);
+
+    // Handle quit game first
+    super::game::handle_quit_game(vec![0x00, 0xFF, 0xFF], src, state.clone()).await?;
+
+    // Remove client from list
+    if let Some(client_info) = state.remove_client(src).await {
+        info!("User quit: {}", user_message);
+        let data = packet_util::build_user_quit_packet(
+            &client_info.username,
+            client_info.user_id,
+            &user_message,
+        );
+        util::broadcast_packet(&state, msg::USER_QUIT, data).await?;
+    } else {
+        debug!(quit_message = user_message.as_str(), "Unknown client quit");
+    }
+    Ok(())
+}
