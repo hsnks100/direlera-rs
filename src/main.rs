@@ -1,7 +1,5 @@
-use handlerf::*;
 use packet_util::*;
 use serde::Deserialize;
-use std::error::Error;
 use std::fs;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
@@ -11,6 +9,7 @@ use tracing::{debug, error, info, warn};
 mod fields;
 mod kaillera;
 mod packet_util;
+mod state;
 
 mod handlers;
 use handlers::*;
@@ -18,8 +17,8 @@ use handlers::*;
 mod session_manager;
 
 mod simplest_game_sync;
-use handlers::data::*;
 use session_manager::SessionManager;
+use state::*;
 
 // Configuration structures
 #[derive(Debug, Deserialize, Clone)]
@@ -97,7 +96,7 @@ fn load_config() -> Config {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
     // Load configuration from direlera.toml
     let config = load_config();
@@ -304,10 +303,12 @@ async fn process_packet_in_session(
 
                     // Handle message and log errors without crashing
                     if let Err(e) = handle_message(message, &addr, global_state.clone()).await {
+                        // Use Debug format to include error chain and context
                         error!(
                             { fields::MESSAGE_NUMBER } = msg_number,
                             { fields::MESSAGE_TYPE } = format!("0x{:02X}", msg_type),
-                            { fields::ERROR } = %e,
+                            error = ?e,
+                            error_chain = %e,
                             "Failed to handle message"
                         );
                     }

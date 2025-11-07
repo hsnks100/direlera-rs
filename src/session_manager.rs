@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
 use tracing::{debug, info, warn};
 
-use crate::{fields, AppState};
+use crate::{fields, packet_util, AppState};
 
 /// Configuration for session timeout behavior
 const SESSION_TIMEOUT: Duration = Duration::from_secs(120);
@@ -146,7 +146,7 @@ impl SessionManager {
                     if let Some(client_info) = global_state.get_client(&addr).await {
                         // If the client was in a game, perform quit game flow
                         if client_info.game_id.is_some() {
-                            let _ = crate::handlers::quit_game::handle_quit_game(
+                            let _ = crate::handlers::game::handle_quit_game(
                                 vec![0x00, 0xFF, 0xFF],
                                 &addr,
                                 global_state.clone(),
@@ -157,19 +157,15 @@ impl SessionManager {
                         // Remove client and broadcast USER_QUIT to lobby
                         if let Some(removed) = global_state.remove_client(&addr).await {
                             use crate::kaillera::message_types as msg;
-                            use bytes::BufMut;
-                            use bytes::BytesMut;
-                            let mut data = BytesMut::new();
-                            data.put(removed.username.as_bytes());
-                            data.put_u8(0);
-                            data.put_u16_le(removed.user_id);
-                            // Reason message similar to user_quit: e.g. "timeout"
-                            data.put("timeout".as_bytes());
-                            data.put_u8(0);
+                            let data = packet_util::build_user_quit_packet(
+                                &removed.username,
+                                removed.user_id,
+                                "timeout",
+                            );
                             let _ = crate::handlers::util::broadcast_packet(
                                 &global_state,
                                 msg::USER_QUIT,
-                                data.to_vec(),
+                                data,
                             )
                             .await;
                         }
@@ -215,7 +211,7 @@ async fn handle_session(
                     // Notify lobby and perform quit if necessary before breaking
                     if let Some(client_info) = global_state.get_client(&addr).await {
                         if client_info.game_id.is_some() {
-                            let _ = crate::handlers::quit_game::handle_quit_game(
+                            let _ = crate::handlers::game::handle_quit_game(
                                 vec![0x00, 0xFF, 0xFF],
                                 &addr,
                                 global_state.clone(),
@@ -224,18 +220,15 @@ async fn handle_session(
                         }
                         if let Some(removed) = global_state.remove_client(&addr).await {
                             use crate::kaillera::message_types as msg;
-                            use bytes::BufMut;
-                            use bytes::BytesMut;
-                            let mut data = BytesMut::new();
-                            data.put(removed.username.as_bytes());
-                            data.put_u8(0);
-                            data.put_u16_le(removed.user_id);
-                            data.put("disconnected".as_bytes());
-                            data.put_u8(0);
+                            let data = packet_util::build_user_quit_packet(
+                                &removed.username,
+                                removed.user_id,
+                                "disconnected",
+                            );
                             let _ = crate::handlers::util::broadcast_packet(
                                 &global_state,
                                 msg::USER_QUIT,
-                                data.to_vec(),
+                                data,
                             )
                             .await;
                         }
@@ -247,7 +240,7 @@ async fn handle_session(
                     // Notify lobby and perform quit if necessary before breaking
                     if let Some(client_info) = global_state.get_client(&addr).await {
                         if client_info.game_id.is_some() {
-                            let _ = crate::handlers::quit_game::handle_quit_game(
+                            let _ = crate::handlers::game::handle_quit_game(
                                 vec![0x00, 0xFF, 0xFF],
                                 &addr,
                                 global_state.clone(),
@@ -256,18 +249,15 @@ async fn handle_session(
                         }
                         if let Some(removed) = global_state.remove_client(&addr).await {
                             use crate::kaillera::message_types as msg;
-                            use bytes::BufMut;
-                            use bytes::BytesMut;
-                            let mut data = BytesMut::new();
-                            data.put(removed.username.as_bytes());
-                            data.put_u8(0);
-                            data.put_u16_le(removed.user_id);
-                            data.put("timeout".as_bytes());
-                            data.put_u8(0);
+                            let data = packet_util::build_user_quit_packet(
+                                &removed.username,
+                                removed.user_id,
+                                "timeout",
+                            );
                             let _ = crate::handlers::util::broadcast_packet(
                                 &global_state,
                                 msg::USER_QUIT,
-                                data.to_vec(),
+                                data,
                             )
                             .await;
                         }

@@ -1,22 +1,20 @@
-use std::error::Error;
-
 use bytes::{Buf, BufMut, BytesMut};
+use color_eyre::eyre::eyre;
 use tracing::debug;
 
-use crate::{GameInfo, Message};
+use crate::{packet_util, state, Message};
 
-use super::data::{AppState, ClientInfo};
+use state::{AppState, ClientInfo, GameInfo};
 
 pub fn build_join_game_response(user: &ClientInfo) -> Vec<u8> {
-    let mut data = Vec::new();
-    data.put_u8(0); // Empty string [00]
+    let mut data = BytesMut::new();
+    packet_util::put_empty_string(&mut data);
     data.put_u32_le(0); // Pointer to Game on Server Side
-    data.put(user.username.as_bytes());
-    data.put_u8(0);
+    packet_util::put_string_with_null(&mut data, &user.username);
     data.put_u32_le(user.ping);
     data.put_u16_le(user.user_id);
     data.put_u8(user.conn_type);
-    data
+    data.to_vec()
 }
 
 pub fn build_new_game_notification(
@@ -25,15 +23,10 @@ pub fn build_new_game_notification(
     emulator_name: &str,
     game_id: u32,
 ) -> Vec<u8> {
-    let mut data = Vec::new();
-    data.put(username.as_bytes());
-    data.put_u8(0);
-    data.put(game_name.as_bytes());
-    data.put_u8(0);
-    data.put(emulator_name.as_bytes());
-    data.put_u8(0);
+    let mut data = BytesMut::new();
+    packet_util::put_strings_with_null(&mut data, &[username, game_name, emulator_name]);
     data.put_u32_le(game_id);
-    data
+    data.to_vec()
 }
 
 // '     0x0D = Player Information
@@ -48,10 +41,10 @@ pub async fn make_player_information(
     src: &std::net::SocketAddr,
     state: &AppState,
     game_info: &GameInfo,
-) -> Result<Vec<u8>, Box<dyn Error>> {
+) -> color_eyre::Result<Vec<u8>> {
     // Prepare response data
     let mut data = BytesMut::new();
-    data.put_u8(0); // Empty string [00]
+    packet_util::put_empty_string(&mut data);
     data.put_u32_le((game_info.players.len() - 1) as u32);
 
     debug!(
@@ -67,8 +60,7 @@ pub async fn make_player_information(
                 .await
                 .map(|c| c.ping)
                 .unwrap_or(0);
-            data.put(player.username.as_bytes());
-            data.put_u8(0); // NULL terminator
+            packet_util::put_string_with_null(&mut data, &player.username);
             data.put_u32_le(ping);
             data.put_u16_le(player.user_id);
             data.put_u8(player.conn_type);
@@ -84,9 +76,9 @@ pub async fn make_player_information(
 // '            1B : Game Status (0=Waiting, 1=Playing, 2=Netsync)
 // '            1B : Number of Players in Room
 // '            1B : Maximum Players
-pub fn make_update_game_status(game_info: &GameInfo) -> Result<Vec<u8>, Box<dyn Error>> {
+pub fn make_update_game_status(game_info: &GameInfo) -> color_eyre::Result<Vec<u8>> {
     let mut data = BytesMut::new();
-    data.put_u8(0); // Empty string [00]
+    packet_util::put_empty_string(&mut data);
     data.put_u32_le(game_info.game_id);
     data.put_u8(game_info.game_status);
     data.put_u8(game_info.num_players);
@@ -97,12 +89,14 @@ pub fn make_update_game_status(game_info: &GameInfo) -> Result<Vec<u8>, Box<dyn 
 pub async fn make_user_joined(
     src: &std::net::SocketAddr,
     state: &AppState,
-) -> Result<Vec<u8>, Box<dyn Error>> {
-    let client_info = state.get_client(src).await.ok_or("Client not found.")?;
+) -> color_eyre::Result<Vec<u8>> {
+    let client_info = state
+        .get_client(src)
+        .await
+        .ok_or_else(|| eyre!("Client not found"))?;
 
     let mut data = BytesMut::new();
-    data.put(client_info.username.as_bytes());
-    data.put_u8(0);
+    packet_util::put_string_with_null(&mut data, &client_info.username);
     data.put_u16_le(client_info.user_id);
     data.put_u32_le(client_info.ping);
     data.put_u8(client_info.conn_type);
@@ -115,9 +109,9 @@ pub async fn send_packet(
     addr: &std::net::SocketAddr,
     packet_type: u8,
     data: Vec<u8>,
-) -> Result<(), Box<dyn Error>> {
+) -> color_eyre::Result<()> {
     let response_packet = state
-        .update_client::<_, Vec<u8>, Box<dyn Error>>(addr, |client| {
+        .update_client::<_, Vec<u8>, color_eyre::Report>(addr, |client| {
             Ok(client.packet_generator.make_send_packet(packet_type, data))
         })
         .await?;
@@ -136,7 +130,7 @@ pub async fn broadcast_packet(
     state: &AppState,
     packet_type: u8,
     data: Vec<u8>,
-) -> Result<(), Box<dyn Error>> {
+) -> color_eyre::Result<()> {
     // Get all client addresses first
     let client_addrs = state.get_all_client_addrs().await;
 
@@ -165,6 +159,49 @@ pub async fn broadcast_packet(
     Ok(())
 }
 
+/// Broadcasts a packet to all players in a specific game
+pub async fn broadcast_packet_to_game(
+    state: &AppState,
+    game_id: u32,
+    packet_type: u8,
+    data: Vec<u8>,
+) -> color_eyre::Result<()> {
+    // Get game info to get player list
+    let game_info = state
+        .get_game(game_id)
+        .await
+        .ok_or_else(|| eyre!("Game not found"))?;
+
+    // Generate packets for all players in the game
+    let packets: Vec<_> = {
+        let addr_map = state.clients_by_addr.read().await;
+        let mut id_map = state.clients_by_id.write().await;
+
+        game_info
+            .players
+            .iter()
+            .filter_map(|player| {
+                let session_id = addr_map.get(&player.addr)?;
+                let client = id_map.get_mut(session_id)?;
+                // Verify client is still in the same game
+                if client.game_id != Some(game_id) {
+                    return None;
+                }
+                let packet = client
+                    .packet_generator
+                    .make_send_packet(packet_type, data.clone());
+                Some((player.addr, packet))
+            })
+            .collect()
+    };
+
+    // Send packets without holding the lock
+    for (addr, packet) in packets {
+        state.tx.send(Message { data: packet, addr }).await?;
+    }
+    Ok(())
+}
+
 pub fn read_string(buf: &mut BytesMut) -> String {
     let mut s = Vec::new();
     while let Some(&b) = buf.first() {
@@ -177,7 +214,7 @@ pub fn read_string(buf: &mut BytesMut) -> String {
     String::from_utf8_lossy(&s).to_string()
 }
 
-pub fn make_server_information() -> Result<Vec<u8>, Box<dyn Error>> {
+pub fn make_server_information() -> color_eyre::Result<Vec<u8>> {
     // Prepare response data
     // '            NB : "Server\0"
     // '            NB : Message
@@ -189,14 +226,14 @@ pub fn make_server_information() -> Result<Vec<u8>, Box<dyn Error>> {
 pub async fn make_server_status(
     src: &std::net::SocketAddr,
     state: &AppState,
-) -> Result<Vec<u8>, Box<dyn Error>> {
+) -> color_eyre::Result<Vec<u8>> {
     let addr_map = state.clients_by_addr.read().await;
     let id_map = state.clients_by_id.read().await;
     let games_lock = state.games.read().await;
 
     // Prepare response data
     let mut data = BytesMut::new();
-    data.put_u8(0); // Empty string [00]
+    packet_util::put_empty_string(&mut data);
 
     // Number of users (excluding self)
     let num_users = (addr_map.len() - 1) as u32;
@@ -210,8 +247,7 @@ pub async fn make_server_status(
     for (addr, session_id) in addr_map.iter() {
         if addr != src {
             if let Some(client_info) = id_map.get(session_id) {
-                data.put(client_info.username.as_bytes());
-                data.put_u8(0); // NULL terminator
+                packet_util::put_string_with_null(&mut data, &client_info.username);
                 data.put_u32_le(client_info.ping);
                 data.put_u8(client_info.player_status);
                 data.put_u16_le(client_info.user_id);
@@ -222,13 +258,10 @@ pub async fn make_server_status(
 
     // Game list
     for game_info in games_lock.values() {
-        data.put(game_info.game_name.as_bytes());
-        data.put_u8(0); // NULL terminator
+        packet_util::put_string_with_null(&mut data, &game_info.game_name);
         data.put_u32_le(game_info.game_id);
-        data.put(game_info.emulator_name.as_bytes());
-        data.put_u8(0); // NULL terminator
-        data.put(game_info.owner.as_bytes());
-        data.put_u8(0); // NULL terminator
+        packet_util::put_string_with_null(&mut data, &game_info.emulator_name);
+        packet_util::put_string_with_null(&mut data, &game_info.owner);
         data.put(format!("{}/{}\0", game_info.num_players, game_info.max_players).as_bytes());
         data.put_u8(game_status_to_byte(game_info.game_status));
     }
@@ -247,7 +280,7 @@ fn game_status_to_byte(status: u8) -> u8 {
 pub async fn fetch_client_info(
     src: &std::net::SocketAddr,
     state: &AppState,
-) -> Result<(String, String, u8, u16), String> {
+) -> color_eyre::Result<(String, String, u8, u16)> {
     match state.get_client(src).await {
         Some(client_info) => Ok((
             client_info.username.clone(),
@@ -255,41 +288,41 @@ pub async fn fetch_client_info(
             client_info.conn_type,
             client_info.user_id,
         )),
-        None => Err(format!("Client not found: addr={}", src)),
+        None => Err(eyre!("Client not found: addr={}", src)),
     }
 }
 
 pub async fn fetch_game_info(
     src: &std::net::SocketAddr,
     state: &AppState,
-) -> Result<GameInfo, String> {
+) -> color_eyre::Result<GameInfo> {
     // Retrieve game_id from client information
     let client_info = state
         .get_client(src)
         .await
-        .ok_or_else(|| format!("Client not found: addr={}", src))?;
+        .ok_or_else(|| eyre!("Client not found: addr={}", src))?;
 
     let game_id = client_info
         .game_id
-        .ok_or_else(|| format!("Game ID not found for client: addr={}", src))?;
+        .ok_or_else(|| eyre!("Game ID not found for client: addr={}", src))?;
 
     // Retrieve game information using game_id
     state
         .get_game(game_id)
         .await
-        .ok_or_else(|| format!("Game not found: game_id={}", game_id))
+        .ok_or_else(|| eyre!("Game not found: game_id={}", game_id))
 }
 
 pub async fn with_client_mut<F, R>(
     state: &AppState,
     src: &std::net::SocketAddr,
     f: F,
-) -> Result<R, Box<dyn Error>>
+) -> color_eyre::Result<R>
 where
     F: FnOnce(&mut ClientInfo) -> R,
 {
     state
-        .update_client::<_, R, Box<dyn Error>>(src, |client_info| Ok(f(client_info)))
+        .update_client::<_, R, color_eyre::Report>(src, |client_info| Ok(f(client_info)))
         .await
 }
 
@@ -297,16 +330,21 @@ pub async fn with_game_mut<F, R>(
     state: &AppState,
     src: &std::net::SocketAddr,
     f: F,
-) -> Result<R, Box<dyn Error>>
+) -> color_eyre::Result<R>
 where
     F: FnOnce(&mut GameInfo) -> R,
 {
     // Retrieve game_id from client information
-    let client_info = state.get_client(src).await.ok_or("Client not found")?;
-    let game_id = client_info.game_id.ok_or("Game ID not found for client")?;
+    let client_info = state
+        .get_client(src)
+        .await
+        .ok_or_else(|| eyre!("Client not found"))?;
+    let game_id = client_info
+        .game_id
+        .ok_or_else(|| eyre!("Game ID not found for client"))?;
 
     // Update game information
     state
-        .update_game::<_, R, Box<dyn Error>>(game_id, |game_info| Ok(f(game_info)))
+        .update_game::<_, R, color_eyre::Report>(game_id, |game_info| Ok(f(game_info)))
         .await
 }
