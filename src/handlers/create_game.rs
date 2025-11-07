@@ -1,6 +1,5 @@
 use crate::*;
 use bytes::{Buf, BytesMut};
-use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Arc;
 use tracing::info;
@@ -40,8 +39,6 @@ pub async fn handle_create_game(
         util::fetch_client_info(src, &state).await?;
 
     // Create new game
-    let mut players = HashSet::new();
-    players.insert(*src);
     let game_info = GameInfo {
         game_id,
         game_name: game_name.clone(),
@@ -50,11 +47,14 @@ pub async fn handle_create_game(
         owner_user_id: user_id, // Store owner's user_id for authorization
         num_players: 1,
         max_players: 4,
-        game_status: 0, // Waiting
-        players,
+        game_status: GAME_STATUS_WAITING,
         sync_manager: None, // Will be initialized when game starts
-        player_addrs: vec![*src],
-        player_delays: vec![conn_type as usize], // Use creator's connection_type as delay
+        players: vec![GamePlayerInfo {
+            addr: *src,
+            username: username.clone(),
+            user_id,
+            conn_type,
+        }],
     };
 
     // Add game

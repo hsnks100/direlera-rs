@@ -105,8 +105,11 @@ pub async fn handle_kick_user(
         let game_info = games_lock.get_mut(&game_id);
         match game_info {
             Some(game_info) => {
-                game_info.players.remove(&client_addr);
-                game_info.num_players -= 1;
+                // Remove from players
+                if let Some(idx) = game_info.players.iter().position(|p| p.addr == client_addr) {
+                    game_info.players.remove(idx);
+                    game_info.num_players -= 1;
+                }
                 game_info.clone()
             }
             None => {
@@ -130,12 +133,12 @@ pub async fn handle_kick_user(
     let status_data = util::make_update_game_status(&game_info_clone)?;
     util::broadcast_packet(&state, msg::UPDATE_GAME_STATUS, status_data).await?;
 
-    for player_addr in game_info_clone.players.iter() {
+    for player in &game_info_clone.players {
         let mut data = BytesMut::new();
         data.put(username.as_bytes());
         data.put_u8(0);
         data.put_u16_le(client_user_id);
-        util::send_packet(&state, player_addr, msg::QUIT_GAME, data.to_vec()).await?;
+        util::send_packet(&state, &player.addr, msg::QUIT_GAME, data.to_vec()).await?;
     }
 
     Ok(())

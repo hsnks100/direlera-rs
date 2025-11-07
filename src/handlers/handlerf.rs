@@ -127,11 +127,11 @@ pub async fn handle_ready_to_play_signal(
         let addr_map = state.clients_by_addr.read().await;
         let id_map = state.clients_by_id.read().await;
 
-        let all_ready = game_info_clone.players.iter().all(|player_addr| {
-            if let Some(session_id) = addr_map.get(player_addr) {
+        let all_ready = game_info_clone.players.iter().all(|player| {
+            if let Some(session_id) = addr_map.get(&player.addr) {
                 if let Some(client_info) = id_map.get(session_id) {
                     debug!(
-                        { fields::ADDR } = %player_addr,
+                        { fields::ADDR } = %player.addr,
                         player_status = client_info.player_status,
                         "Checking player status"
                     );
@@ -139,7 +139,7 @@ pub async fn handle_ready_to_play_signal(
                 }
             }
             debug!(
-                { fields::ADDR } = %player_addr,
+                { fields::ADDR } = %player.addr,
                 "Client info not found"
             );
             false
@@ -149,9 +149,9 @@ pub async fn handle_ready_to_play_signal(
 
     // If all ready, update all players' status
     if all_user_ready_to_signal {
-        for player_addr in game_info_clone.players.iter() {
+        for player in &game_info_clone.players {
             let _ = state
-                .update_client::<_, (), Box<dyn Error>>(player_addr, |client_info| {
+                .update_client::<_, (), Box<dyn Error>>(&player.addr, |client_info| {
                     client_info.player_status = PLAYER_STATUS_PLAYING;
                     Ok(())
                 })
@@ -165,12 +165,11 @@ pub async fn handle_ready_to_play_signal(
             { fields::PLAYER_COUNT } = game_info_clone.players.len(),
             "All users ready to signal - starting game"
         );
-        for player_addr in game_info_clone.players.iter() {
+        for player in &game_info_clone.players {
             let mut data = BytesMut::new();
             data.put_u8(0);
-            util::send_packet(&state, player_addr, msg::READY_TO_PLAY, data.to_vec()).await?;
+            util::send_packet(&state, &player.addr, msg::READY_TO_PLAY, data.to_vec()).await?;
         }
     }
     Ok(())
 }
-

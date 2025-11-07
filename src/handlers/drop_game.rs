@@ -40,110 +40,74 @@ pub async fn execute_drop_game(
     let client = state.get_client(src).await.ok_or("Client not found")?;
     let username = client.username.clone();
 
-    // End the game (not the room!)
-    let (was_playing, game_players, dropper_player_id, pending_outputs) = {
-        let mut games = state.games.write().await;
-        let game_info = games.get_mut(&game_id).ok_or("Game not found")?;
+    // Validate game is playing and get dropper info
+    let dropper_player_id = {
+        let games = state.games.read().await;
+        let game_info = games.get(&game_id).ok_or("Game not found")?;
 
         // Check if game is actually playing
-        let was_playing = game_info.game_status == 1;
+        if game_info.game_status != GAME_STATUS_PLAYING {
+            info!("Game is not playing, skipping drop game");
+            return Ok(false);
+        }
+
+        // Find dropper's player_id
+        game_info
+            .players
+            .iter()
+            .position(|p| p.addr == *src)
+            .ok_or("Dropper not found in game")?
+    };
+
+    // Mark player as dropped and get all necessary data (in one lock)
+    let (outputs, players, _all_dropped) = {
+        let mut games = state.games.write().await;
+        let game_info = games.get_mut(&game_id).ok_or("Game not found")?;
 
         info!(
             { fields::USER_NAME } = username.as_str(),
             { fields::GAME_ID } = game_id,
-            { fields::WAS_PLAYING } = was_playing,
-            "Ending game - all players will be dropped (room stays open)"
+            "Ending game",
         );
 
-        // Find dropper's player_id
-        let dropper_player_id = game_info
-            .player_addrs
-            .iter()
-            .position(|addr| addr == src)
-            .ok_or("Dropper not found in game")?;
+        // Mark player as dropped and get pending outputs
+        let outputs = game_info
+            .sync_manager
+            .as_mut()
+            .ok_or("Sync manager not found")?
+            .mark_player_dropped(dropper_player_id)
+            .map_err(|e| format!("Failed to mark player dropped: {}", e))?;
 
-        // Fill dropper's future inputs with empty data to unblock other players
-        // This allows other players to receive responses for their pending inputs
-        let mut pending_outputs = Vec::new();
-        if was_playing {
-            if let Some(sync_manager) = &mut game_info.sync_manager {
-                let player_delay = sync_manager.get_player_delay(dropper_player_id);
-                // Fill enough frames to handle any pending inputs from other players
-                let frames_to_fill = player_delay * 10; // Conservative estimate
+        info!("Marked player {} as dropped", dropper_player_id);
 
-                for _ in 0..frames_to_fill {
-                    let outputs = sync_manager.process_client_input(
-                        dropper_player_id,
-                        crate::simple_game_sync::ClientInput::GameData(vec![0x00, 0x00]),
-                    );
-                    pending_outputs.extend(outputs);
-                }
+        let all_dropped = game_info
+            .sync_manager
+            .as_ref()
+            .ok_or("Sync manager not found")?
+            .sync
+            .all_players_dropped();
 
-                debug!(
-                    { fields::PLAYER_ID } = dropper_player_id,
-                    frames_filled = frames_to_fill,
-                    pending_outputs_count = pending_outputs.len(),
-                    "Filled empty frames for dropped player"
-                );
-            }
-
-            // End the game but keep the room
-            game_info.game_status = 0; // Back to Waiting
-                                       // Note: Keep sync_manager alive to handle any in-flight GC/GD packets
-                                       // Clients will stop sending after receiving drop notification
-        } else {
-            info!(
-                { fields::USER_NAME } = username.as_str(),
-                { fields::GAME_ID } = game_id,
-                "Drop requested but game already ended - sending confirmation"
-            );
+        if all_dropped {
+            game_info.game_status = GAME_STATUS_WAITING;
+            let status_data = util::make_update_game_status(game_info)?;
+            util::broadcast_packet(state, msg::UPDATE_GAME_STATUS, status_data).await?;
+            game_info.sync_manager = None;
         }
 
-        // Get all players for notification (including the one who dropped)
-        let game_players: Vec<_> = game_info.players.iter().cloned().collect();
-        let player_addrs = game_info.player_addrs.clone();
+        // Clone data before releasing the lock
+        let players = game_info.players.clone();
 
-        (
-            was_playing,
-            game_players,
-            dropper_player_id,
-            (pending_outputs, player_addrs),
-        )
+        (outputs, players, all_dropped)
     };
 
     // Update all players' status back to IDLE (waiting in room)
-    for player_addr in &game_players {
-        util::with_client_mut(state, player_addr, |client_info| {
+    for player in &players {
+        util::with_client_mut(state, &player.addr, |client_info| {
             client_info.player_status = PLAYER_STATUS_IDLE;
         })
         .await?;
     }
 
-    // Send pending outputs to unblock waiting players FIRST
-    let (pending_outputs, player_addrs) = pending_outputs;
-    for output in pending_outputs {
-        let target_addr = &player_addrs[output.player_id];
-
-        let (message_type, data_to_send) = match output.response {
-            crate::simple_game_sync::ServerResponse::GameData(data) => {
-                let mut buf = BytesMut::new();
-                buf.put_u8(0); // Null byte
-                buf.extend_from_slice(&data);
-                (0x12, buf.to_vec())
-            }
-            crate::simple_game_sync::ServerResponse::GameCache(position) => {
-                let mut buf = BytesMut::new();
-                buf.put_u8(0); // Null byte
-                buf.put_u8(position);
-                (0x13, buf.to_vec())
-            }
-        };
-
-        util::send_packet(state, target_addr, message_type, data_to_send).await?;
-    }
-
-    // Send drop game notification to all players
-    // All players receive the username of who dropped the game
     let dropper_player_num = (dropper_player_id + 1) as u8;
 
     let mut notification_data = BytesMut::new();
@@ -151,29 +115,55 @@ pub async fn execute_drop_game(
     notification_data.put_u8(0); // Null terminator
     notification_data.put_u8(dropper_player_num);
 
-    for player_addr in &game_players {
-        util::send_packet(state, player_addr, msg::DROP_GAME, notification_data.to_vec()).await?;
+    for player in &players {
+        util::send_packet(
+            state,
+            &player.addr,
+            msg::DROP_GAME,
+            notification_data.to_vec(),
+        )
+        .await?;
+    }
+
+    // info!(
+    //     { fields::DROPPER_USERNAME } = username.as_str(),
+    //     { fields::PLAYER_NUMBER } = dropper_player_num,
+    //     { fields::PLAYER_COUNT } = game_players.len(),
+    //     "Sent drop notification to all players"
+    // );
+
+    // Send any outputs that can now be sent due to the drop
+    for output in outputs {
+        let target_addr = &players[output.player_id].addr;
+
+        let (message_type, data_to_send) = match output.response {
+            simplest_game_sync::ServerResponse::GameData(data) => {
+                let mut buf = BytesMut::new();
+                buf.put_u8(0); // Empty string
+                buf.put_u16_le(data.len() as u16);
+                buf.put(data.as_slice());
+                (msg::GAME_DATA, buf.to_vec())
+            }
+            simplest_game_sync::ServerResponse::GameCache(position) => {
+                (msg::GAME_CACHE, vec![0x00, position])
+            }
+        };
+
+        info!(
+            { fields::PLAYER_ID } = output.player_id,
+            message_type = msg::message_type_name(message_type),
+            "Sending game data/cache after drop to player"
+        );
+        util::send_packet(state, target_addr, message_type, data_to_send).await?;
     }
 
     info!(
-        { fields::DROPPER_USERNAME } = username.as_str(),
-        { fields::PLAYER_NUMBER } = dropper_player_num,
-        { fields::PLAYER_COUNT } = game_players.len(),
-        "Sent drop notification to all players"
-    );
-
-    // Update game status for all clients AFTER drop notification
-    let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
-    let status_data = util::make_update_game_status(&game_info)?;
-    util::broadcast_packet(state, msg::UPDATE_GAME_STATUS, status_data).await?;
-
-    info!(
         { fields::GAME_ID } = game_id,
-        { fields::PLAYER_COUNT } = game_players.len(),
+        { fields::PLAYER_COUNT } = players.len(),
         "Game ended, room remains open"
     );
 
-    Ok(was_playing)
+    Ok(true)
 }
 
 pub async fn handle_drop_game(
@@ -183,7 +173,6 @@ pub async fn handle_drop_game(
 ) -> Result<(), Box<dyn Error>> {
     debug!("Drop game request received");
 
-    // Get game_id
     let client = state.get_client(src).await.ok_or("Client not found")?;
     let game_id = client.game_id.ok_or("Client not in a game")?;
 

@@ -59,15 +59,19 @@ pub async fn make_player_information(
         "Building player information"
     );
 
-    for player_addr in game_info.players.iter() {
-        if player_addr != src {
-            if let Some(client_info) = state.get_client(player_addr).await {
-                data.put(client_info.username.as_bytes());
-                data.put_u8(0); // NULL terminator
-                data.put_u32_le(client_info.ping);
-                data.put_u16_le(client_info.user_id);
-                data.put_u8(client_info.conn_type);
-            }
+    for player in &game_info.players {
+        if player.addr != *src {
+            // Get current ping from ClientInfo (it can change during game)
+            let ping = state
+                .get_client(&player.addr)
+                .await
+                .map(|c| c.ping)
+                .unwrap_or(0);
+            data.put(player.username.as_bytes());
+            data.put_u8(0); // NULL terminator
+            data.put_u32_le(ping);
+            data.put_u16_le(player.user_id);
+            data.put_u8(player.conn_type);
         }
     }
     Ok(data.to_vec())

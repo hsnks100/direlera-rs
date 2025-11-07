@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tracing::debug;
 
 use crate::kaillera::message_types as msg;
-use crate::simple_game_sync;
+use crate::simplest_game_sync;
 use crate::*;
 
 /*
@@ -29,9 +29,9 @@ pub async fn handle_game_data(
     // Find player_id from address
     let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
     let player_id = game_info
-        .player_addrs
+        .players
         .iter()
-        .position(|addr| addr == src)
+        .position(|p| p.addr == *src)
         .ok_or("Player not in game")?;
 
     debug!(
@@ -50,26 +50,29 @@ pub async fn handle_game_data(
             .as_mut()
             .ok_or("SimpleGameSync not initialized")?;
 
-        // Process input using SimpleGameSync
-        sync_manager.process_client_input(
-            player_id,
-            simple_game_sync::ClientInput::GameData(game_data),
-        )
+        // Process input using CachedGameSync
+        sync_manager
+            .process_client_input(
+                player_id,
+                simplest_game_sync::ClientInput::GameData(game_data),
+            )
+            .map_err(|e| format!("Game sync error: {}", e))?
     };
 
     // Send outputs to respective players
+    let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
     for output in outputs {
-        let target_addr = &game_info.player_addrs[output.player_id];
+        let target_addr = &game_info.players[output.player_id].addr;
 
         let (message_type, data_to_send) = match output.response {
-            simple_game_sync::ServerResponse::GameData(data) => {
+            simplest_game_sync::ServerResponse::GameData(data) => {
                 let mut buf = BytesMut::new();
                 buf.put_u8(0); // Empty string
                 buf.put_u16_le(data.len() as u16);
                 buf.put(data.as_slice());
                 (msg::GAME_DATA, buf.to_vec())
             }
-            simple_game_sync::ServerResponse::GameCache(position) => {
+            simplest_game_sync::ServerResponse::GameCache(position) => {
                 (msg::GAME_CACHE, vec![0x00, position])
             }
         };

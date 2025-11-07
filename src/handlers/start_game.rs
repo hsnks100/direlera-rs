@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use crate::kaillera::message_types as msg;
-use crate::simple_game_sync;
+use crate::simplest_game_sync::CachedGameSync;
 /*
 '     0x11 = Start Game
 '            Client Request:
@@ -45,6 +45,16 @@ pub async fn handle_start_game(
 
     // Check if requester is the game owner (using user_id to prevent nickname abuse)
     let game_info = state.get_game(game_id).await.ok_or("Game not found")?;
+    if game_info.sync_manager.is_some() {
+        warn!(
+            { fields::USER_NAME } = requester_username.as_str(),
+            { fields::USER_ID } = requester_user_id,
+            { fields::GAME_ID } = game_id,
+            "Game not started"
+        );
+        // let chat_message = util::make_game_chat(requester_username, game_id, "Game not started");
+        return Ok(()); // Silently ignore invalid request
+    }
     if game_info.owner_user_id != requester_user_id {
         warn!(
             { fields::USER_NAME } = requester_username.as_str(),
@@ -56,23 +66,37 @@ pub async fn handle_start_game(
         return Ok(()); // Silently ignore invalid request
     }
 
+    // Get game info first to get player list
+    let game_info_before = util::fetch_game_info(src, &state).await?;
+    let players = game_info_before.players.clone();
+
     // Initialize SimpleGameSync when game starts
     util::with_game_mut(&state, src, |game_info| {
-        game_info.game_status = 1; // Playing
+        game_info.game_status = GAME_STATUS_PLAYING; // Playing
 
-        // Initialize SimpleGameSync with player delays
-        let delays = game_info.player_delays.clone();
-        game_info.sync_manager = Some(simple_game_sync::SimpleGameSync::new_without_padding(
-            delays,
-        ));
+        // Initialize CachedGameSync with player delays (derived from conn_type)
+        let delays: Vec<usize> = game_info
+            .players
+            .iter()
+            .map(|p| p.conn_type as usize)
+            .collect();
+        game_info.sync_manager = Some(CachedGameSync::new(delays));
     })
     .await?;
+
+    // Update all players' status to NET_SYNC when game starts
+    for player in &players {
+        util::with_client_mut(&state, &player.addr, |client_info| {
+            client_info.player_status = PLAYER_STATUS_NET_SYNC;
+        })
+        .await?;
+    }
 
     let game_info = util::fetch_game_info(src, &state).await?;
 
     info!(
         { fields::GAME_ID } = game_id,
-        { fields::PLAYER_COUNT } = game_info.player_addrs.len(),
+        { fields::PLAYER_COUNT } = game_info.players.len(),
         { fields::GAME_STATUS } = "playing",
         "Game started"
     );
@@ -81,21 +105,30 @@ pub async fn handle_start_game(
     let status_data = util::make_update_game_status(&game_info)?;
     util::broadcast_packet(&state, msg::UPDATE_GAME_STATUS, status_data).await?;
 
+    // Broadcast server status update to all clients to reflect player status changes
+    // This ensures that all clients see the updated player_status (NET_SYNC/PLAYING) in the server list
+    // let all_client_addrs = state.get_all_client_addrs().await;
+    // for client_addr in &all_client_addrs {
+    //     if let Ok(data) = util::make_server_status(client_addr, &state).await {
+    //         util::send_packet(&state, client_addr, msg::SERVER_STATUS, data).await?;
+    //     }
+    // }
+
     // Send start game notification with each player's delay
-    for (i, player_addr) in game_info.player_addrs.iter().enumerate() {
-        let player_delay = game_info.player_delays[i];
+    for (i, player) in game_info.players.iter().enumerate() {
+        let player_delay = player.conn_type as usize;
         let mut data = BytesMut::new();
         data.put_u8(0);
         data.put_u16_le(player_delay as u16); // Frame Delay (player's connection_type)
         debug!(
             player_number = i + 1,
             frame_delay = player_delay,
-            { fields::ADDR } = %player_addr,
+            { fields::ADDR } = %player.addr,
             "Sending start game notification"
         );
         data.put_u8((i + 1) as u8); // Player Number (1-indexed)
-        data.put_u8(game_info.player_addrs.len() as u8); // Total Players
-        util::send_packet(&state, player_addr, msg::START_GAME, data.to_vec()).await?;
+        data.put_u8(game_info.players.len() as u8); // Total Players
+        util::send_packet(&state, &player.addr, msg::START_GAME, data.to_vec()).await?;
     }
     Ok(())
 }

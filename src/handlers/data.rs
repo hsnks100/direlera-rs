@@ -1,5 +1,6 @@
+use crate::simplest_game_sync;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     net::SocketAddr,
     sync::atomic::{AtomicU16, AtomicU32, Ordering},
     sync::Arc,
@@ -7,8 +8,6 @@ use std::{
 };
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
-
-use crate::simple_game_sync;
 
 type PlayerStatus = u8;
 pub const PLAYER_STATUS_PLAYING: PlayerStatus = 0;
@@ -110,6 +109,7 @@ impl AppState {
             // This will be converted to the error type E by the caller
             panic!("Game not found")
         })?;
+
         f(game)
     }
 
@@ -128,6 +128,7 @@ impl AppState {
         let client = id_map
             .get_mut(&session_id)
             .ok_or_else(|| panic!("Client not found"))?;
+
         f(client)
     }
 }
@@ -150,6 +151,21 @@ pub struct ClientInfo {
     pub packet_generator: crate::kaillera::protocol::UDPPacketGenerator,
 }
 
+pub const GAME_STATUS_WAITING: u8 = 0;
+pub const GAME_STATUS_PLAYING: u8 = 1;
+#[allow(dead_code)]
+pub const GAME_STATUS_NET_SYNC: u8 = 2;
+
+/// Player information stored in GameInfo (immutable after joining)
+/// These fields don't change once a player joins the game
+#[derive(Debug, Clone)]
+pub struct GamePlayerInfo {
+    pub addr: std::net::SocketAddr,
+    pub username: String,
+    pub user_id: u16,
+    pub conn_type: u8,
+}
+
 #[derive(Debug, Clone)]
 pub struct GameInfo {
     pub game_id: u32,
@@ -160,11 +176,8 @@ pub struct GameInfo {
     pub num_players: u8,
     pub max_players: u8,
     pub game_status: u8, // 0=Waiting, 1=Playing, 2=Netsync
-    pub players: HashSet<std::net::SocketAddr>,
+    // Player information in order (indexed by player_id)
+    pub players: Vec<GamePlayerInfo>,
     // New: SimpleGameSync for frame synchronization
-    pub sync_manager: Option<simple_game_sync::SimpleGameSync>,
-    // Player addresses in order (indexed by player_id)
-    pub player_addrs: Vec<std::net::SocketAddr>,
-    // Player delays (indexed by player_id)
-    pub player_delays: Vec<usize>,
+    pub sync_manager: Option<simplest_game_sync::CachedGameSync>,
 }
