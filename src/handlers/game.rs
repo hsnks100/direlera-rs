@@ -17,21 +17,42 @@ pub async fn handle_create_game(
     // Check if user is already in a game
     if let Some(client_info) = state.get_client(src).await {
         if let Some(existing_game_id) = client_info.game_id {
-            tracing::warn!(
-                { fields::USER_NAME } = client_info.username.as_str(),
-                { fields::GAME_ID } = existing_game_id,
-                "User attempted to create game while already in a game"
-            );
-            return Ok(()); // Silently ignore invalid request
+            // Verify the game actually exists and user is still in it
+            if let Some(existing_game) = state.get_game(existing_game_id).await {
+                if existing_game.players.iter().any(|p| p.addr == *src) {
+                    tracing::warn!(
+                        { fields::USER_NAME } = client_info.username_str().as_str(),
+                        { fields::GAME_ID } = existing_game_id,
+                        "User attempted to create game while already in a game"
+                    );
+                    return Ok(()); // Silently ignore invalid request
+                }
+            }
+            // If game doesn't exist or user is not in it, clean up stale game_id
+            util::with_client_mut(&state, src, |client_info| {
+                client_info.game_id = None;
+            })
+            .await?;
         }
     }
 
     // Parse the message to extract game_name
     let mut buf = BytesMut::from(&message.data[..]);
-    let _ = util::read_string(&mut buf); // Empty String
-    let game_name = util::read_string(&mut buf); // Game Name
-    let _ = util::read_string(&mut buf); // Empty String
+    let _ = util::read_string_bytes(&mut buf); // Empty String
+    let mut game_name = util::read_string_bytes(&mut buf); // Game Name (read as bytes to preserve encoding)
+    let _ = util::read_string_bytes(&mut buf); // Empty String
     let _ = if buf.len() >= 4 { buf.get_u32_le() } else { 0 }; // 4B: 0xFF
+
+    // Validate game name length (127 bytes max - not characters, to preserve encoding)
+    if game_name.len() > 127 {
+        warn!(
+            { fields::USER_NAME } = ?src,
+            game_name_len = game_name.len(),
+            "Game name too long, truncating to 127 bytes"
+        );
+        // Truncate to 127 bytes
+        game_name.truncate(127);
+    }
 
     // Lock-free ID generation!
     let game_id = state.next_game_id();
@@ -69,9 +90,9 @@ pub async fn handle_create_game(
 
     info!(
         { fields::GAME_ID } = game_id,
-        { fields::GAME_NAME } = game_name.as_str(),
-        { fields::USER_NAME } = username.as_str(),
-        emulator = emulator_name.as_str(),
+        { fields::GAME_NAME } = util::bytes_for_log(&game_name).as_str(),
+        { fields::USER_NAME } = util::bytes_for_log(&username).as_str(),
+        emulator = util::bytes_for_log(&emulator_name).as_str(),
         "Game created"
     );
 
@@ -109,9 +130,9 @@ pub async fn handle_join_game(
 ) -> color_eyre::Result<()> {
     // Parse message
     let mut buf = BytesMut::from(&message.data[..]);
-    let _ = util::read_string(&mut buf);
+    let _ = util::read_string_bytes(&mut buf);
     let game_id = buf.get_u32_le();
-    let _ = util::read_string(&mut buf);
+    let _ = util::read_string_bytes(&mut buf);
     let _ = buf.get_u32_le();
     let _ = buf.get_u16_le();
     let _conn_type = buf.get_u8();
@@ -126,7 +147,7 @@ pub async fn handle_join_game(
     // Prevent joining if user is already in any game (same or different)
     if let Some(current_game_id) = client.game_id {
         tracing::warn!(
-            { fields::USER_NAME } = client.username.as_str(),
+            { fields::USER_NAME } = client.username_str().as_str(),
             { fields::GAME_ID } = game_id,
             current_game_id = current_game_id,
             "User attempted to join game while already in a game"
@@ -170,7 +191,7 @@ pub async fn handle_join_game(
 
     info!(
         { fields::GAME_ID } = game_id,
-        { fields::USER_NAME } = username.as_str(),
+        { fields::USER_NAME } = util::bytes_for_log(&username).as_str(),
         { fields::PLAYER_COUNT } = game_info.num_players,
         "Player joined game"
     );
@@ -258,10 +279,11 @@ pub async fn handle_quit_game(
     // If game is in playing state, drop game first for all players
     info!(
         { fields::GAME_ID } = game_id,
-        { fields::USER_NAME } = username.as_str(),
+        { fields::USER_NAME } = util::bytes_for_log(&username).as_str(),
         "Checking if game is in playing state before quit"
     );
-    execute_drop_game(game_id, src, &state).await?;
+    // Ignore errors from execute_drop_game - it's safe to continue even if drop fails
+    let _ = execute_drop_game(game_id, src, &state).await;
 
     // Update game info
     let game_info_clone = {
@@ -297,7 +319,7 @@ pub async fn handle_quit_game(
         // Close the game - Remove game from games list
         info!(
             { fields::GAME_ID } = game_info_clone.game_id,
-            { fields::USER_NAME } = username.as_str(),
+            { fields::USER_NAME } = util::bytes_for_log(&username).as_str(),
             { fields::USER_ID } = user_id,
             "Owner quit - closing game"
         );
@@ -323,7 +345,7 @@ pub async fn handle_quit_game(
     } else {
         info!(
             { fields::GAME_ID } = game_info_clone.game_id,
-            { fields::USER_NAME } = username.as_str(),
+            { fields::USER_NAME } = util::bytes_for_log(&username).as_str(),
             { fields::PLAYER_COUNT } = game_info_clone.num_players,
             "Player quit game"
         );
@@ -369,7 +391,7 @@ pub async fn handle_start_game(
     state: Arc<AppState>,
 ) -> color_eyre::Result<()> {
     let mut buf = BytesMut::from(&message.data[..]);
-    let _ = util::read_string(&mut buf); // Empty String
+    let _ = util::read_string_bytes(&mut buf); // Empty String
     let _ = buf.get_u32_le(); // 0xFFFF 0xFF 0xFF
 
     let client = state
@@ -387,21 +409,33 @@ pub async fn handle_start_game(
         .get_game(game_id)
         .await
         .ok_or_else(|| eyre!("Game not found"))?;
+
+    // Verify requester is actually in the game's players list
+    if !game_info.players.iter().any(|p| p.addr == *src) {
+        warn!(
+            { fields::USER_NAME } = util::bytes_for_log(&requester_username).as_str(),
+            { fields::USER_ID } = requester_user_id,
+            { fields::GAME_ID } = game_id,
+            "User attempted to start game but not in game players list"
+        );
+        return Ok(()); // Silently ignore invalid request
+    }
+
     if game_info.sync_manager.is_some() {
         warn!(
-            { fields::USER_NAME } = requester_username.as_str(),
+            { fields::USER_NAME } = util::bytes_for_log(&requester_username).as_str(),
             { fields::USER_ID } = requester_user_id,
             { fields::GAME_ID } = game_id,
             "Game not started"
         );
         let chat_message =
-            packet_util::build_game_chat_packet(&requester_username, "Game is already started");
+            packet_util::build_game_chat_packet(&requester_username, b"Game is already started");
         util::broadcast_packet_to_game(&state, game_id, msg::GAME_CHAT, chat_message).await?;
         return Ok(()); // Silently ignore invalid request
     }
     if game_info.owner_user_id != requester_user_id {
         warn!(
-            { fields::USER_NAME } = requester_username.as_str(),
+            { fields::USER_NAME } = util::bytes_for_log(&requester_username).as_str(),
             { fields::USER_ID } = requester_user_id,
             { fields::GAME_ID } = game_id,
             owner_user_id = game_info.owner_user_id,
@@ -516,7 +550,13 @@ pub async fn execute_drop_game(
     // Validate game is playing and get dropper info
     let dropper_player_id = {
         let games = state.games.read().await;
-        let game_info = games.get(&game_id).ok_or_else(|| eyre!("Game not found"))?;
+        let game_info = match games.get(&game_id) {
+            Some(game_info) => game_info,
+            None => {
+                debug!("Game not found during drop game, ignoring");
+                return Ok(false);
+            }
+        };
 
         // Check if game is actually playing
         if game_info.game_status != GAME_STATUS_PLAYING {
@@ -525,11 +565,13 @@ pub async fn execute_drop_game(
         }
 
         // Find dropper's player_id
-        game_info
-            .players
-            .iter()
-            .position(|p| p.addr == *src)
-            .ok_or_else(|| eyre!("Dropper not found in game"))?
+        match game_info.players.iter().position(|p| p.addr == *src) {
+            Some(player_id) => player_id,
+            None => {
+                debug!("Dropper not found in game players list, ignoring");
+                return Ok(false);
+            }
+        }
     };
 
     // Mark player as dropped and get all necessary data (in one lock)
@@ -540,7 +582,7 @@ pub async fn execute_drop_game(
             .ok_or_else(|| eyre!("Game not found"))?;
 
         info!(
-            { fields::USER_NAME } = username.as_str(),
+            { fields::USER_NAME } = util::bytes_for_log(&username).as_str(),
             { fields::GAME_ID } = game_id,
             "Ending game",
         );
@@ -650,7 +692,7 @@ pub async fn handle_kick_user(
     state: Arc<AppState>,
 ) -> color_eyre::Result<()> {
     let mut buf = BytesMut::from(&message.data[..]);
-    let _ = util::read_string(&mut buf); // Empty String
+    let _ = util::read_string_bytes(&mut buf); // Empty String
     let user_id = buf.get_u16_le(); // UserID
 
     // Check if requester is the game owner (using user_id to prevent nickname abuse)
@@ -668,9 +710,21 @@ pub async fn handle_kick_user(
         .get_game(requester_game_id)
         .await
         .ok_or_else(|| eyre!("Game not found"))?;
+
+    // Verify requester is actually in the game's players list
+    if !game_info.players.iter().any(|p| p.addr == *src) {
+        warn!(
+            { fields::USER_NAME } = util::bytes_for_log(&requester_username).as_str(),
+            { fields::USER_ID } = requester_user_id,
+            { fields::GAME_ID } = requester_game_id,
+            "User attempted to kick but not in game players list"
+        );
+        return Ok(()); // Silently ignore invalid request
+    }
+
     if game_info.owner_user_id != requester_user_id {
         warn!(
-            { fields::USER_NAME } = requester_username.as_str(),
+            { fields::USER_NAME } = util::bytes_for_log(&requester_username).as_str(),
             { fields::USER_ID } = requester_user_id,
             { fields::GAME_ID } = requester_game_id,
             owner_user_id = game_info.owner_user_id,
@@ -712,7 +766,8 @@ pub async fn handle_kick_user(
                 Some(game_id) => {
                     if game_id != requester_game_id {
                         warn!(
-                            { fields::USER_NAME } = requester_username.as_str(),
+                            { fields::USER_NAME } =
+                                util::bytes_for_log(&requester_username).as_str(),
                             { fields::GAME_ID } = requester_game_id,
                             kicked_user_game_id = game_id,
                             "Attempted to kick user from different game"
@@ -762,7 +817,7 @@ pub async fn handle_kick_user(
     };
 
     info!(
-        { fields::USER_NAME } = username.as_str(),
+        { fields::USER_NAME } = util::bytes_for_log(&username).as_str(),
         { fields::USER_ID } = client_user_id,
         { fields::GAME_ID } = game_id,
         "User kicked from game"

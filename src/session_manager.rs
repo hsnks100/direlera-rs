@@ -160,7 +160,7 @@ impl SessionManager {
                             let data = packet_util::build_user_quit_packet(
                                 &removed.username,
                                 removed.user_id,
-                                "timeout",
+                                b"timeout",
                             );
                             let _ = crate::handlers::util::broadcast_packet(
                                 &global_state,
@@ -223,7 +223,7 @@ async fn handle_session(
                             let data = packet_util::build_user_quit_packet(
                                 &removed.username,
                                 removed.user_id,
-                                "disconnected",
+                                b"disconnected",
                             );
                             let _ = crate::handlers::util::broadcast_packet(
                                 &global_state,
@@ -252,7 +252,7 @@ async fn handle_session(
                             let data = packet_util::build_user_quit_packet(
                                 &removed.username,
                                 removed.user_id,
-                                "timeout",
+                                b"timeout",
                             );
                             let _ = crate::handlers::util::broadcast_packet(
                                 &global_state,

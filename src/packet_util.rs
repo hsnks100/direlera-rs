@@ -6,6 +6,7 @@ use tokio::io;
 use tokio::net::UdpSocket;
 use tracing::{debug, error};
 
+#[allow(dead_code)]
 pub async fn handle_control_socket(
     control_socket: Arc<UdpSocket>,
     main_port: u16,
@@ -88,10 +89,16 @@ pub fn parse_packet(data: &[u8]) -> Result<Vec<kaillera::protocol::ParsedMessage
 
 // Packet building utilities
 
-/// Appends a string with null terminator to the buffer
-pub fn put_string_with_null(buf: &mut BytesMut, s: &str) {
-    buf.put(s.as_bytes());
+/// Appends bytes with null terminator to the buffer (preserves original encoding)
+pub fn put_bytes_with_null(buf: &mut BytesMut, bytes: &[u8]) {
+    buf.put(bytes);
     buf.put_u8(0);
+}
+
+/// Appends a string with null terminator to the buffer (converts to UTF-8 bytes)
+#[allow(dead_code)]
+pub fn put_string_with_null(buf: &mut BytesMut, s: &str) {
+    put_bytes_with_null(buf, s.as_bytes());
 }
 
 /// Appends an empty string (just null terminator) to the buffer
@@ -100,6 +107,7 @@ pub fn put_empty_string(buf: &mut BytesMut) {
 }
 
 /// Appends multiple strings with null terminators to the buffer
+#[allow(dead_code)]
 pub fn put_strings_with_null(buf: &mut BytesMut, strings: &[&str]) {
     for s in strings {
         put_string_with_null(buf, s);
@@ -121,37 +129,37 @@ pub fn build_start_game_packet(frame_delay: u16, player_number: u8, total_player
 
 /// Builds a GAME_CHAT packet
 /// Format: Username (NB), Message (NB)
-pub fn build_game_chat_packet(username: &str, message: &str) -> Vec<u8> {
+pub fn build_game_chat_packet(username: &[u8], message: &[u8]) -> Vec<u8> {
     let mut data = BytesMut::new();
-    put_string_with_null(&mut data, username);
-    put_string_with_null(&mut data, message);
+    put_bytes_with_null(&mut data, username);
+    put_bytes_with_null(&mut data, message);
     data.to_vec()
 }
 
 /// Builds a GLOBAL_CHAT packet
 /// Format: Username (NB), Message (NB)
-pub fn build_global_chat_packet(username: &str, message: &str) -> Vec<u8> {
+pub fn build_global_chat_packet(username: &[u8], message: &[u8]) -> Vec<u8> {
     let mut data = BytesMut::new();
-    put_string_with_null(&mut data, username);
-    put_string_with_null(&mut data, message);
+    put_bytes_with_null(&mut data, username);
+    put_bytes_with_null(&mut data, message);
     data.to_vec()
 }
 
 /// Builds a USER_QUIT packet
 /// Format: Username (NB), UserID (2B), Message (NB)
-pub fn build_user_quit_packet(username: &str, user_id: u16, message: &str) -> Vec<u8> {
+pub fn build_user_quit_packet(username: &[u8], user_id: u16, message: &[u8]) -> Vec<u8> {
     let mut data = BytesMut::new();
-    put_string_with_null(&mut data, username);
+    put_bytes_with_null(&mut data, username);
     data.put_u16_le(user_id);
-    put_string_with_null(&mut data, message);
+    put_bytes_with_null(&mut data, message);
     data.to_vec()
 }
 
 /// Builds a QUIT_GAME packet
 /// Format: Username (NB), UserID (2B)
-pub fn build_quit_game_packet(username: &str, user_id: u16) -> Vec<u8> {
+pub fn build_quit_game_packet(username: &[u8], user_id: u16) -> Vec<u8> {
     let mut data = BytesMut::new();
-    put_string_with_null(&mut data, username);
+    put_bytes_with_null(&mut data, username);
     data.put_u16_le(user_id);
     data.to_vec()
 }
@@ -187,9 +195,9 @@ pub fn build_server_to_client_ack_packet() -> Vec<u8> {
 
 /// Builds a DROP_GAME packet
 /// Format: Username (NB), Player Number (1B)
-pub fn build_drop_game_packet(username: &str, player_number: u8) -> Vec<u8> {
+pub fn build_drop_game_packet(username: &[u8], player_number: u8) -> Vec<u8> {
     let mut data = BytesMut::new();
-    put_string_with_null(&mut data, username);
+    put_bytes_with_null(&mut data, username);
     data.put_u8(player_number);
     data.to_vec()
 }

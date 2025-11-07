@@ -10,7 +10,7 @@ pub fn build_join_game_response(user: &ClientInfo) -> Vec<u8> {
     let mut data = BytesMut::new();
     packet_util::put_empty_string(&mut data);
     data.put_u32_le(0); // Pointer to Game on Server Side
-    packet_util::put_string_with_null(&mut data, &user.username);
+    packet_util::put_bytes_with_null(&mut data, &user.username);
     data.put_u32_le(user.ping);
     data.put_u16_le(user.user_id);
     data.put_u8(user.conn_type);
@@ -18,13 +18,15 @@ pub fn build_join_game_response(user: &ClientInfo) -> Vec<u8> {
 }
 
 pub fn build_new_game_notification(
-    username: &str,
-    game_name: &str,
-    emulator_name: &str,
+    username: &[u8],
+    game_name: &[u8],
+    emulator_name: &[u8],
     game_id: u32,
 ) -> Vec<u8> {
     let mut data = BytesMut::new();
-    packet_util::put_strings_with_null(&mut data, &[username, game_name, emulator_name]);
+    packet_util::put_bytes_with_null(&mut data, username);
+    packet_util::put_bytes_with_null(&mut data, game_name);
+    packet_util::put_bytes_with_null(&mut data, emulator_name);
     data.put_u32_le(game_id);
     data.to_vec()
 }
@@ -60,7 +62,7 @@ pub async fn make_player_information(
                 .await
                 .map(|c| c.ping)
                 .unwrap_or(0);
-            packet_util::put_string_with_null(&mut data, &player.username);
+            packet_util::put_bytes_with_null(&mut data, &player.username);
             data.put_u32_le(ping);
             data.put_u16_le(player.user_id);
             data.put_u8(player.conn_type);
@@ -96,7 +98,7 @@ pub async fn make_user_joined(
         .ok_or_else(|| eyre!("Client not found"))?;
 
     let mut data = BytesMut::new();
-    packet_util::put_string_with_null(&mut data, &client_info.username);
+    packet_util::put_bytes_with_null(&mut data, &client_info.username);
     data.put_u16_le(client_info.user_id);
     data.put_u32_le(client_info.ping);
     data.put_u8(client_info.conn_type);
@@ -202,7 +204,8 @@ pub async fn broadcast_packet_to_game(
     Ok(())
 }
 
-pub fn read_string(buf: &mut BytesMut) -> String {
+/// Read a null-terminated string as bytes (preserves original encoding)
+pub fn read_string_bytes(buf: &mut BytesMut) -> Vec<u8> {
     let mut s = Vec::new();
     while let Some(&b) = buf.first() {
         buf.advance(1);
@@ -211,7 +214,46 @@ pub fn read_string(buf: &mut BytesMut) -> String {
         }
         s.push(b);
     }
-    String::from_utf8_lossy(&s).to_string()
+    s
+}
+
+/// Read a null-terminated string as String (for backward compatibility, uses lossy conversion)
+#[allow(dead_code)]
+pub fn read_string(buf: &mut BytesMut) -> String {
+    let bytes = read_string_bytes(buf);
+    String::from_utf8_lossy(&bytes).to_string()
+}
+
+/// Convert bytes to a safe string for logging
+/// Shows ASCII characters as-is, non-ASCII as hex
+/// This prevents log corruption when bytes are in CP949 or other encodings
+pub fn bytes_for_log(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+
+    // Try UTF-8 first
+    if let Ok(utf8_str) = std::str::from_utf8(bytes) {
+        // If it's valid UTF-8 and contains only printable characters, return as-is
+        if utf8_str
+            .chars()
+            .all(|c| c.is_ascii() || (!c.is_control() && c != '\u{FFFD}'))
+        {
+            return utf8_str.to_string();
+        }
+    }
+
+    // For non-UTF-8 or problematic bytes, show ASCII as-is and hex for others
+    let mut result = String::new();
+    for &byte in bytes {
+        // ASCII printable: 0x20-0x7E (space to ~)
+        if (0x20..=0x7E).contains(&byte) {
+            result.push(byte as char);
+        } else {
+            result.push_str(&format!("\\x{:02x}", byte));
+        }
+    }
+    result
 }
 
 pub fn make_server_information() -> color_eyre::Result<Vec<u8>> {
@@ -247,7 +289,7 @@ pub async fn make_server_status(
     for (addr, session_id) in addr_map.iter() {
         if addr != src {
             if let Some(client_info) = id_map.get(session_id) {
-                packet_util::put_string_with_null(&mut data, &client_info.username);
+                packet_util::put_bytes_with_null(&mut data, &client_info.username);
                 data.put_u32_le(client_info.ping);
                 data.put_u8(client_info.player_status);
                 data.put_u16_le(client_info.user_id);
@@ -258,10 +300,10 @@ pub async fn make_server_status(
 
     // Game list
     for game_info in games_lock.values() {
-        packet_util::put_string_with_null(&mut data, &game_info.game_name);
+        packet_util::put_bytes_with_null(&mut data, &game_info.game_name);
         data.put_u32_le(game_info.game_id);
-        packet_util::put_string_with_null(&mut data, &game_info.emulator_name);
-        packet_util::put_string_with_null(&mut data, &game_info.owner);
+        packet_util::put_bytes_with_null(&mut data, &game_info.emulator_name);
+        packet_util::put_bytes_with_null(&mut data, &game_info.owner);
         data.put(format!("{}/{}\0", game_info.num_players, game_info.max_players).as_bytes());
         data.put_u8(game_status_to_byte(game_info.game_status));
     }
@@ -280,7 +322,7 @@ fn game_status_to_byte(status: u8) -> u8 {
 pub async fn fetch_client_info(
     src: &std::net::SocketAddr,
     state: &AppState,
-) -> color_eyre::Result<(String, String, u8, u16)> {
+) -> color_eyre::Result<(Vec<u8>, Vec<u8>, u8, u16)> {
     match state.get_client(src).await {
         Some(client_info) => Ok((
             client_info.username.clone(),
