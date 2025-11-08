@@ -632,7 +632,17 @@ pub async fn execute_drop_game(
 
     // Send any outputs that can now be sent due to the drop
     for output in outputs {
-        let target_addr = &players[output.player_id].addr;
+        // Safety check: ensure player_id is within bounds
+        let target_addr = &players
+            .get(output.player_id)
+            .ok_or_else(|| {
+                eyre!(
+                    "Invalid player_id: {} (players count: {})",
+                    output.player_id,
+                    players.len()
+                )
+            })?
+            .addr;
 
         let (message_type, data_to_send) = match output.response {
             simplest_game_sync::ServerResponse::GameData(data) => {

@@ -1,6 +1,7 @@
 use std::cmp;
 use std::collections::VecDeque;
 
+#[derive(Debug)]
 pub struct ParsedMessage {
     pub message_number: u16,
     #[allow(dead_code)]

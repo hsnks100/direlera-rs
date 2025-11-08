@@ -74,7 +74,18 @@ pub async fn handle_game_data(
         .await
         .ok_or_else(|| eyre!("Game not found"))?;
     for output in outputs {
-        let target_addr = &game_info.players[output.player_id].addr;
+        // Safety check: ensure player_id is within bounds
+        let target_addr = game_info
+            .players
+            .get(output.player_id)
+            .ok_or_else(|| {
+                eyre!(
+                    "Invalid player_id: {} (players count: {})",
+                    output.player_id,
+                    game_info.players.len()
+                )
+            })?
+            .addr;
 
         let (message_type, data_to_send) = match output.response {
             simplest_game_sync::ServerResponse::GameData(data) => {
@@ -92,7 +103,7 @@ pub async fn handle_game_data(
             { fields::DATA_LENGTH } = data_to_send.len(),
             "Sending game data to player"
         );
-        util::send_packet(&state, target_addr, message_type, data_to_send).await?;
+        util::send_packet(&state, &target_addr, message_type, data_to_send).await?;
     }
 
     Ok(())
@@ -152,7 +163,18 @@ pub async fn handle_game_cache(
         .await
         .ok_or_else(|| eyre!("Game not found"))?;
     for output in outputs {
-        let target_addr = &game_info.players[output.player_id].addr;
+        // Safety check: ensure player_id is within bounds
+        let target_addr = game_info
+            .players
+            .get(output.player_id)
+            .ok_or_else(|| {
+                eyre!(
+                    "Invalid player_id: {} (players count: {})",
+                    output.player_id,
+                    game_info.players.len()
+                )
+            })?
+            .addr;
 
         let (message_type, data_to_send) = match output.response {
             simplest_game_sync::ServerResponse::GameData(data) => {
@@ -170,7 +192,7 @@ pub async fn handle_game_cache(
             { fields::DATA_LENGTH } = data_to_send.len(),
             "Sending cache data to player"
         );
-        util::send_packet(&state, target_addr, message_type, data_to_send).await?;
+        util::send_packet(&state, &target_addr, message_type, data_to_send).await?;
     }
 
     Ok(())

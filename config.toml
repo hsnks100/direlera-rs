@@ -1,6 +1,17 @@
 main_port = 8080
 control_port = 27888
 
+# Welcome message shown to clients when they connect
+# The welcome message is shown to clients on connect.
+# You can modify the message by editing or adding multiple lines
+welcome_message = """
+Welcome to the Kaillera server!
+Enjoy your stay.
+Feel free to start or join a game.
+안녕하세요.
+おはようございます...
+"""
+
 # Tracing configuration
 # Format options: "pretty", "compact", "json"
 # - pretty: human-readable multi-line format (best for development)

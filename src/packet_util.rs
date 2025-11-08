@@ -56,13 +56,26 @@ pub fn parse_packet(data: &[u8]) -> Result<Vec<kaillera::protocol::ParsedMessage
     }
     let num_messages = buf.get_u8();
 
+    // Log detailed info for debugging
+    if num_messages == 0 {
+        return Err(format!(
+            "Invalid packet: num_messages is 0, total_size={}, remaining={}",
+            data.len(),
+            buf.len()
+        ));
+    }
+
     let mut messages = Vec::new();
 
-    for _ in 0..num_messages {
+    for i in 0..num_messages {
         if buf.len() < 5 {
             return Err(format!(
-                "Incomplete message header. Buffer size: {}",
-                buf.len()
+                "Incomplete message header at message {}/{}. Buffer size: {}, total_packet_size: {}, first_bytes: {:02x?}",
+                i + 1,
+                num_messages,
+                buf.len(),
+                data.len(),
+                &data[..data.len().min(10)]
             ));
         }
 

@@ -28,7 +28,7 @@ pub async fn handle_global_chat(
 
     info!(
         "Global chat message: {}",
-        String::from_utf8_lossy(&chat_message)
+        util::bytes_to_string(&chat_message)
     );
 
     // Server notification creation
@@ -86,7 +86,7 @@ pub async fn handle_game_chat(
 
     info!(
         "Game chat message: {}",
-        String::from_utf8_lossy(&chat_message)
+        util::bytes_to_string(&chat_message)
     );
 
     // Build and broadcast packet to all players in the game

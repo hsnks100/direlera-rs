@@ -15,6 +15,7 @@ pub const PLAYER_STATUS_IDLE: PlayerStatus = 1;
 pub const PLAYER_STATUS_NET_SYNC: PlayerStatus = 2;
 
 // AppState - centralized state with RwLock for efficiency
+#[derive(Debug)]
 pub struct AppState {
     // RwLock: multiple readers, exclusive writer
     pub clients_by_addr: Arc<RwLock<HashMap<SocketAddr, Uuid>>>,
@@ -27,10 +28,13 @@ pub struct AppState {
     pub next_user_id: Arc<AtomicU16>,
 
     pub tx: mpsc::Sender<crate::Message>,
+
+    // Server configuration
+    pub config: Arc<crate::Config>,
 }
 
 impl AppState {
-    pub fn new(tx: mpsc::Sender<crate::Message>) -> Self {
+    pub fn new(tx: mpsc::Sender<crate::Message>, config: crate::Config) -> Self {
         Self {
             clients_by_addr: Arc::new(RwLock::new(HashMap::new())),
             clients_by_id: Arc::new(RwLock::new(HashMap::new())),
@@ -39,6 +43,7 @@ impl AppState {
             next_game_id: Arc::new(AtomicU32::new(1)),
             next_user_id: Arc::new(AtomicU16::new(1)),
             tx,
+            config: Arc::new(config),
         }
     }
 
