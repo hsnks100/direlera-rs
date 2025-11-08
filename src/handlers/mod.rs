@@ -6,11 +6,17 @@ pub mod util;
 
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 use crate::kaillera::message_types as msg;
 use crate::*;
 
+// You can use #[instrument(skip(state))] to prevent selected arguments (like 'state') from being included in the default tracing output.
+// This helps avoid logging large or sensitive data, or types that do not implement Debug.
+// For tracing, all arguments except those listed in skip() will be captured.
+// Always use English comments.
+// Only skip 'state' and 'message' in tracing, do not skip 'src' so that 'src' appears in tracing logs.
+#[instrument(skip(state, message))]
 pub async fn handle_message(
     message: kaillera::protocol::ParsedMessage,
     src: &std::net::SocketAddr,
@@ -74,7 +80,7 @@ pub async fn handle_client_to_server_ack(
         let data = util::make_user_joined(src, &state).await?;
         util::broadcast_packet(&state, msg::USER_JOINED, data).await?;
 
-        let data = util::make_server_information()?;
+        let data = util::make_server_information(&state, src).await?;
         util::send_packet(&state, src, msg::SERVER_INFORMATION, data).await?;
     } else {
         // Server notification creation

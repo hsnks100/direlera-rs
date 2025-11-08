@@ -1,3 +1,4 @@
+use direlera_rs::logger::{init_logger, LogFormat, LogLevel};
 use packet_util::*;
 use serde::Deserialize;
 use std::fs;
@@ -22,13 +23,15 @@ use state::*;
 
 // Configuration structures
 #[derive(Debug, Deserialize, Clone)]
-struct Config {
+pub struct Config {
     #[serde(default = "default_main_port")]
-    main_port: u16,
+    pub main_port: u16,
     #[serde(default = "default_sub_port")]
-    control_port: u16,
+    pub control_port: u16,
     #[serde(default)]
-    tracing: TracingConfig,
+    pub tracing: TracingConfig,
+    #[serde(default = "default_welcome_message")]
+    pub welcome_message: String,
 }
 
 impl Default for Config {
@@ -37,16 +40,17 @@ impl Default for Config {
             main_port: default_main_port(),
             control_port: default_sub_port(),
             tracing: TracingConfig::default(),
+            welcome_message: default_welcome_message(),
         }
     }
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct TracingConfig {
+pub struct TracingConfig {
     #[serde(default = "default_format")]
-    format: String,
+    pub format: String,
     #[serde(default = "default_level")]
-    level: String,
+    pub level: String,
 }
 
 impl Default for TracingConfig {
@@ -74,72 +78,60 @@ fn default_level() -> String {
     "info".to_string()
 }
 
-// Load configuration from direlera.toml
+fn default_welcome_message() -> String {
+    "Welcome to the Kaillera server!".to_string()
+}
+
+// Load configuration from config.toml
 fn load_config() -> Config {
-    match fs::read_to_string("direlera.toml") {
+    match fs::read_to_string("config.toml") {
         Ok(contents) => match toml::from_str(&contents) {
             Ok(config) => {
-                eprintln!("Configuration loaded from direlera.toml");
+                eprintln!("Configuration loaded from config.toml");
                 config
             }
             Err(e) => {
-                eprintln!("Failed to parse direlera.toml: {}", e);
+                eprintln!("Failed to parse config.toml: {}", e);
                 eprintln!("Using default configuration");
                 Config::default()
             }
         },
         Err(_) => {
-            eprintln!("direlera.toml not found, using default configuration");
+            eprintln!("config.toml not found, using default configuration");
             Config::default()
         }
     }
 }
-
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
-    // Load configuration from direlera.toml
+    // Load configuration from config.toml
     let config = load_config();
 
     // Parse log level
     let log_level = match config.tracing.level.to_lowercase().as_str() {
-        "trace" => tracing::Level::TRACE,
-        "debug" => tracing::Level::DEBUG,
-        "info" => tracing::Level::INFO,
-        "warn" => tracing::Level::WARN,
-        "error" => tracing::Level::ERROR,
+        "trace" => LogLevel::Trace,
+        "debug" => LogLevel::Debug,
+        "info" => LogLevel::Info,
+        "warn" => LogLevel::Warn,
+        "error" => LogLevel::Error,
         _ => {
             eprintln!("Invalid log level '{}', using INFO", config.tracing.level);
-            tracing::Level::INFO
+            LogLevel::Info
         }
     };
 
     // Initialize tracing subscriber based on config
-    match config.tracing.format.to_lowercase().as_str() {
-        "pretty" => {
-            tracing_subscriber::fmt()
-                .with_max_level(log_level)
-                .with_target(false)
-                .pretty()
-                .init();
-        }
-        "json" => {
-            tracing_subscriber::fmt()
-                .with_max_level(log_level)
-                .with_target(false)
-                .json()
-                .init();
-        }
-        "compact" | _ => {
-            tracing_subscriber::fmt()
-                .with_max_level(log_level)
-                .with_target(false)
-                .init();
-        }
-    }
+    let log_format = match config.tracing.format.to_lowercase().as_str() {
+        "pretty" => LogFormat::Pretty,
+        "json" => LogFormat::Json,
+        "compact" | _ => LogFormat::Compact,
+    };
+
+    init_logger(log_format, log_level);
 
     info!(
-        { fields::CONFIG_SOURCE } = "direlera.toml",
+        { fields::CONFIG_SOURCE } = "config.toml",
         { fields::PORT } = config.main_port,
         control_port = config.control_port,
         tracing_format = config.tracing.format.as_str(),
@@ -184,7 +176,7 @@ async fn main() -> color_eyre::Result<()> {
     let (tx, mut rx) = mpsc::channel::<Message>(100);
 
     // Centralized AppState with RwLock for efficiency (shared by all sessions)
-    let global_state = Arc::new(AppState::new(tx.clone()));
+    let global_state = Arc::new(AppState::new(tx.clone(), config.clone()));
 
     // Initialize Session Manager for TCP-like session handling
     let (session_manager, packet_rx) = SessionManager::new();
@@ -316,9 +308,16 @@ async fn process_packet_in_session(
             }
         }
         Err(e) => {
+            // Log first few bytes for debugging
+            let preview = if data.len() > 0 {
+                format!("{:02x?}", &data[..data.len().min(20)])
+            } else {
+                "empty".to_string()
+            };
             warn!(
                 { fields::PACKET_SIZE } = data.len(),
                 { fields::ERROR } = %e,
+                packet_preview = preview,
                 "Failed to parse packet"
             );
         }

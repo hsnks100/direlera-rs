@@ -1,6 +1,7 @@
 use bytes::{Buf, BufMut, BytesMut};
 use color_eyre::eyre::eyre;
-use tracing::debug;
+use encoding_rs::{Encoding, EUC_KR, GBK, SHIFT_JIS, UTF_8};
+use tracing::{debug, info};
 
 use crate::{packet_util, state, Message};
 
@@ -47,7 +48,10 @@ pub async fn make_player_information(
     // Prepare response data
     let mut data = BytesMut::new();
     packet_util::put_empty_string(&mut data);
-    data.put_u32_le((game_info.players.len() - 1) as u32);
+    // Number of users in room (excluding self)
+    // Safe: players.len() is always >= 1 when this function is called (at least the caller is in the game)
+    let player_count = game_info.players.len().saturating_sub(1);
+    data.put_u32_le(player_count as u32);
 
     debug!(
         PLAYER_COUNT = game_info.players.len(),
@@ -224,45 +228,289 @@ pub fn read_string(buf: &mut BytesMut) -> String {
     String::from_utf8_lossy(&bytes).to_string()
 }
 
-/// Convert bytes to a safe string for logging
-/// Shows ASCII characters as-is, non-ASCII as hex
-/// This prevents log corruption when bytes are in CP949 or other encodings
-pub fn bytes_for_log(bytes: &[u8]) -> String {
-    if bytes.is_empty() {
-        return String::new();
-    }
+/// Language detection result
+#[derive(Debug, Clone, Copy)]
+struct LanguageDetection {
+    #[allow(dead_code)]
+    korean_count: usize,
+    #[allow(dead_code)]
+    japanese_count: usize,
+    #[allow(dead_code)]
+    chinese_count: usize,
+    has_korean: bool,
+    has_japanese: bool,
+    has_chinese: bool,
+}
 
-    // Try UTF-8 first
-    if let Ok(utf8_str) = std::str::from_utf8(bytes) {
-        // If it's valid UTF-8 and contains only printable characters, return as-is
-        if utf8_str
-            .chars()
-            .all(|c| c.is_ascii() || (!c.is_control() && c != '\u{FFFD}'))
+/// Detect language from text by analyzing Unicode character ranges
+fn detect_language(text: &str) -> LanguageDetection {
+    let mut korean_count = 0;
+    let mut japanese_count = 0;
+    let mut chinese_count = 0;
+
+    for ch in text.chars() {
+        let code = ch as u32;
+
+        // Korean: Hangul Syllables (완성형 한글) and Hangul Jamo (자모: 초성/중성/종성)
+        // Hangul Syllables: 0xAC00-0xD7AF
+        // Hangul Jamo: 0x1100-0x11FF (초성/중성/종성)
+        // Hangul Compatibility Jamo: 0x3130-0x318F (호환용 자모, 초성만 입력할 때 사용)
+        if (0xAC00..=0xD7AF).contains(&code)
+            || (0x1100..=0x11FF).contains(&code)
+            || (0x3130..=0x318F).contains(&code)
         {
-            return utf8_str.to_string();
+            korean_count += 1;
+        }
+        // Japanese: Hiragana (0x3040-0x309F), Katakana (0x30A0-0x30FF)
+        else if (0x3040..=0x309F).contains(&code) || (0x30A0..=0x30FF).contains(&code) {
+            japanese_count += 1;
+        }
+        // Chinese: CJK Unified Ideographs (0x4E00-0x9FFF)
+        // Note: This range is shared with Japanese/Chinese, but we prioritize Hiragana/Katakana for Japanese
+        else if (0x4E00..=0x9FFF).contains(&code) {
+            chinese_count += 1;
         }
     }
 
-    // For non-UTF-8 or problematic bytes, show ASCII as-is and hex for others
+    LanguageDetection {
+        korean_count,
+        japanese_count,
+        chinese_count,
+        has_korean: korean_count > 0,
+        has_japanese: japanese_count > 0,
+        has_chinese: chinese_count > 0,
+    }
+}
+
+/// Try to decode bytes with multiple encodings and return the best result
+/// Returns the decoded string and the encoding name used
+fn try_decode_bytes(bytes: &[u8]) -> (String, &'static str) {
+    if bytes.is_empty() {
+        return (String::new(), "empty");
+    }
+    debug!(
+        bytes_hex = format!("{:02x?}", bytes), // 전체 바이트 출력
+        bytes_len = bytes.len(),
+        "Trying to decode bytes with multiple encodings"
+    );
+
+    // First, try UTF-8 - if it's valid UTF-8, use it immediately
+    // UTF-8 is the modern standard and should be preferred when valid
+    if let Ok(utf8_str) = std::str::from_utf8(bytes) {
+        // Check if it contains non-ASCII characters (indicates it's actually UTF-8, not just ASCII)
+        let has_non_ascii = utf8_str.chars().any(|c| !c.is_ascii() && !c.is_control());
+        let score = utf8_str
+            .chars()
+            .filter(|c| !c.is_control() && *c != '\u{FFFD}')
+            .count();
+
+        // If it's valid UTF-8 with non-ASCII characters, prefer it
+        if has_non_ascii && score > 0 {
+            debug!(
+                bytes_hex = format!("{:02x?}", &bytes[..bytes.len().min(20)]),
+                selected_encoding = "UTF-8",
+                score = score,
+                "Valid UTF-8 detected, using UTF-8"
+            );
+            return (utf8_str.to_string(), "UTF-8");
+        }
+    }
+
+    // If UTF-8 is not valid or only ASCII, try legacy encodings (EUC-KR, Shift-JIS, GBK)
+    // These are multi-byte encodings like EUC-KR, not UTF-8
+    let encodings: &[(&'static Encoding, &str)] =
+        &[(EUC_KR, "EUC-KR"), (SHIFT_JIS, "Shift-JIS"), (GBK, "GBK")];
+
+    let mut best_result: Option<(String, &str, usize)> = None;
+    let mut all_results: Vec<(&str, String, usize, bool)> = Vec::new();
+
+    for (encoding, name) in encodings {
+        let (decoded, _, had_errors) = encoding.decode(bytes);
+        let decoded_str = decoded.into_owned();
+
+        // Score: count printable, non-control characters
+        let score = decoded_str
+            .chars()
+            .filter(|c| !c.is_control() && *c != '\u{FFFD}')
+            .count();
+
+        // Prefer results with:
+        // 1. No errors
+        // 2. Higher score (more printable characters)
+        // 3. Contains non-ASCII characters (indicates successful decoding)
+        // 4. Bonus: if decoded text contains language-specific characters, prefer that encoding
+        let lang_detection = detect_language(&decoded_str);
+        let has_language_chars =
+            lang_detection.has_korean || lang_detection.has_japanese || lang_detection.has_chinese;
+
+        let is_good = !had_errors
+            && score > 0
+            && decoded_str
+                .chars()
+                .any(|c| !c.is_ascii() && !c.is_control());
+
+        // Boost score if language-specific characters are detected
+        // Give extra bonus if Korean characters are detected (to prefer EUC-KR over Shift-JIS)
+        let final_score = if has_language_chars && is_good {
+            let mut bonus = 100; // Base bonus for language-specific characters
+            if lang_detection.has_korean && *name == "EUC-KR" {
+                bonus += 200; // Extra bonus for Korean text with EUC-KR encoding
+            } else if lang_detection.has_japanese && *name == "Shift-JIS" {
+                bonus += 200; // Extra bonus for Japanese text with Shift-JIS encoding
+            }
+            score + bonus
+        } else {
+            score
+        };
+
+        all_results.push((name, decoded_str.clone(), final_score, had_errors));
+
+        if is_good {
+            match best_result {
+                Some((_, _, best_score)) if final_score > best_score => {
+                    best_result = Some((decoded_str, name, final_score));
+                }
+                None => {
+                    best_result = Some((decoded_str, name, final_score));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Log all attempts for debugging
+    debug!(
+        bytes_hex = format!("{:02x?}", &bytes[..bytes.len().min(20)]),
+        "Trying to decode bytes with multiple encodings"
+    );
+    for (name, decoded, final_score, had_errors) in &all_results {
+        // Safely truncate to 30 characters (not bytes) to avoid UTF-8 boundary issues
+        let preview = if decoded.chars().count() > 30 {
+            format!("{}...", decoded.chars().take(30).collect::<String>())
+        } else {
+            decoded.clone()
+        };
+        debug!(
+            encoding = name,
+            score = final_score,
+            had_errors = had_errors,
+            preview = preview,
+            "Decoding attempt"
+        );
+    }
+
+    // If we found a good result, return it
+    if let Some((result, encoding_name, score)) = best_result {
+        // Safely truncate to 50 characters (not bytes) to avoid UTF-8 boundary issues
+        let result_preview = if result.chars().count() > 50 {
+            format!("{}...", result.chars().take(50).collect::<String>())
+        } else {
+            result.clone()
+        };
+        debug!(
+            selected_encoding = encoding_name,
+            score = score,
+            result_preview = result_preview,
+            "Selected encoding for decoding"
+        );
+        return (result, encoding_name);
+    }
+
+    // Fallback: try UTF-8 with lossy conversion
+    let utf8_result = String::from_utf8_lossy(bytes);
+    if utf8_result
+        .chars()
+        .any(|c| !c.is_control() && c != '\u{FFFD}')
+    {
+        debug!("Using UTF-8 (lossy) as fallback");
+        return (utf8_result.to_string(), "UTF-8 (lossy)");
+    }
+
+    // Last resort: show ASCII as-is and hex for others
+    debug!("Using hex representation as last resort");
     let mut result = String::new();
     for &byte in bytes {
-        // ASCII printable: 0x20-0x7E (space to ~)
         if (0x20..=0x7E).contains(&byte) {
             result.push(byte as char);
         } else {
             result.push_str(&format!("\\x{:02x}", byte));
         }
     }
-    result
+    (result, "hex")
 }
 
-pub fn make_server_information() -> color_eyre::Result<Vec<u8>> {
+/// Convert bytes to a safe string for logging
+/// Tries multiple encodings to find the best match
+/// This handles CP949, UTF-8, Shift-JIS, GBK, etc.
+pub fn bytes_for_log(bytes: &[u8]) -> String {
+    let (decoded, _encoding) = try_decode_bytes(bytes);
+    decoded
+}
+
+/// Convert bytes to a readable string, trying multiple encodings
+/// Returns the decoded string (for display/logging purposes)
+pub fn bytes_to_string(bytes: &[u8]) -> String {
+    let (decoded, _encoding) = try_decode_bytes(bytes);
+    decoded
+}
+
+/// Detect encoding based on welcome message content
+/// Analyzes the message text to determine which encoding should be used
+fn detect_encoding_from_message(message: &str) -> &'static Encoding {
+    // Check if message has non-ASCII characters
+    let has_non_ascii = message.chars().any(|c| !c.is_ascii());
+
+    // If no non-ASCII characters, use UTF-8 (most compatible)
+    if !has_non_ascii {
+        return UTF_8;
+    }
+
+    // Use common language detection function
+    let lang_detection = detect_language(message);
+
+    // Priority: Japanese > Korean > Chinese Simplified > UTF-8
+    if lang_detection.has_korean {
+        return EUC_KR;
+    }
+    if lang_detection.has_japanese {
+        return SHIFT_JIS;
+    }
+    if lang_detection.has_chinese {
+        // Default to GBK for Chinese, but could be Big5
+        // In practice, GBK is more common
+        return GBK;
+    }
+
+    // Default to UTF-8 for other cases (European languages, etc.)
+    UTF_8
+}
+
+pub async fn make_server_information(
+    state: &AppState,
+    _client_addr: &std::net::SocketAddr,
+) -> color_eyre::Result<Vec<u8>> {
     // Prepare response data
     // '            NB : "Server\0"
     // '            NB : Message
     let mut data = BytesMut::new();
     data.put("Server\0".as_bytes());
-    data.put("Welcome to the Kaillera server!\0".as_bytes());
+
+    // Detect encoding based on welcome message content
+    let encoding = detect_encoding_from_message(&state.config.welcome_message);
+    info!("Encoding: {}", encoding.name());
+
+    // Convert welcome message from UTF-8 (config.toml) to detected encoding
+    let (welcome_bytes, _, had_errors) = encoding.encode(&state.config.welcome_message);
+    if had_errors {
+        debug!(
+            encoding = encoding.name(),
+            "Some characters could not be encoded, using lossy conversion"
+        );
+    }
+
+    data.put(welcome_bytes.as_ref());
+    data.put_u8(0); // Null terminator
+
     Ok(data.to_vec())
 }
 pub async fn make_server_status(
@@ -278,8 +526,9 @@ pub async fn make_server_status(
     packet_util::put_empty_string(&mut data);
 
     // Number of users (excluding self)
-    let num_users = (addr_map.len() - 1) as u32;
-    data.put_u32_le(num_users);
+    // Safe: addr_map.len() is always >= 1 when this function is called (at least the caller exists)
+    let num_users = addr_map.len().saturating_sub(1);
+    data.put_u32_le(num_users as u32);
 
     // Number of games
     let num_games = games_lock.len() as u32;
