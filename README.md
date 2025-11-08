@@ -66,24 +66,6 @@ The server runs on the following ports by default:
 - **Main Port**: 8080 (game logic)
 - **Control Port**: 27888 (initial connection and ping)
 
-### Configuration
-
-You can configure the server by modifying the `direlera.toml` file:
-
-```toml
-main_port = 27888
-sub_port = 27999
-debug = false
-random_ping = false
-priority = 32
-key = "your-secret-key"
-notice = """
-Write your server notice here.
-You can write multiple lines.
-Korean characters are supported too!
-"""
-```
-
 ## Wireshark Dissector Setup
 
 The included Wireshark dissector allows you to analyze Kaillera protocol packets.

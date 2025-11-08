@@ -19,5 +19,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           RUSTTARGET: ${{ matrix.target }}
-          EXTRA_FILES: "README.md LICENSE direlera.toml"
+          EXTRA_FILES: "README.md LICENSE config.toml"
           TOOLCHAIN_VERSION: "1.82"
