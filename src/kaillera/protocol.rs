@@ -1,6 +1,7 @@
 use std::cmp;
 use std::collections::VecDeque;
 
+#[derive(Debug)]
 pub struct ParsedMessage {
     pub message_number: u16,
     #[allow(dead_code)]
@@ -25,6 +26,12 @@ pub fn make_packet(message_type: u8, seq: u16, data: Vec<u8>) -> Vec<u8> {
 pub struct UDPPacketGenerator {
     recent_packets: VecDeque<Vec<u8>>,
     send_count: u16,
+}
+
+impl Default for UDPPacketGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl UDPPacketGenerator {

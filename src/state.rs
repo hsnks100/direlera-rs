@@ -1,5 +1,6 @@
+use crate::simplest_game_sync;
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::HashMap,
     net::SocketAddr,
     sync::atomic::{AtomicU16, AtomicU32, Ordering},
     sync::Arc,
@@ -8,14 +9,13 @@ use std::{
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
-use crate::simple_game_sync;
-
 type PlayerStatus = u8;
 pub const PLAYER_STATUS_PLAYING: PlayerStatus = 0;
 pub const PLAYER_STATUS_IDLE: PlayerStatus = 1;
 pub const PLAYER_STATUS_NET_SYNC: PlayerStatus = 2;
 
 // AppState - centralized state with RwLock for efficiency
+#[derive(Debug)]
 pub struct AppState {
     // RwLock: multiple readers, exclusive writer
     pub clients_by_addr: Arc<RwLock<HashMap<SocketAddr, Uuid>>>,
@@ -28,10 +28,13 @@ pub struct AppState {
     pub next_user_id: Arc<AtomicU16>,
 
     pub tx: mpsc::Sender<crate::Message>,
+
+    // Server configuration
+    pub config: Arc<crate::Config>,
 }
 
 impl AppState {
-    pub fn new(tx: mpsc::Sender<crate::Message>) -> Self {
+    pub fn new(tx: mpsc::Sender<crate::Message>, config: crate::Config) -> Self {
         Self {
             clients_by_addr: Arc::new(RwLock::new(HashMap::new())),
             clients_by_id: Arc::new(RwLock::new(HashMap::new())),
@@ -40,6 +43,7 @@ impl AppState {
             next_game_id: Arc::new(AtomicU32::new(1)),
             next_user_id: Arc::new(AtomicU16::new(1)),
             tx,
+            config: Arc::new(config),
         }
     }
 
@@ -110,6 +114,7 @@ impl AppState {
             // This will be converted to the error type E by the caller
             panic!("Game not found")
         })?;
+
         f(game)
     }
 
@@ -128,6 +133,7 @@ impl AppState {
         let client = id_map
             .get_mut(&session_id)
             .ok_or_else(|| panic!("Client not found"))?;
+
         f(client)
     }
 }
@@ -136,8 +142,8 @@ impl AppState {
 #[derive(Debug, Clone)]
 pub struct ClientInfo {
     pub session_id: Uuid,
-    pub username: String,
-    pub emulator_name: String,
+    pub username: Vec<u8>, // Store as bytes to preserve original encoding (CP949, etc.)
+    pub emulator_name: Vec<u8>, // Store as bytes to preserve original encoding
     pub conn_type: u8,
     pub user_id: u16,
     pub ping: u32,
@@ -146,64 +152,115 @@ pub struct ClientInfo {
     pub last_ping_time: Option<Instant>,
     pub ack_count: u16,
     //////////////////
-    /// Cache for received data (client's send cache).
-    pub receive_cache: crate::game_cache::GameCache,
-    /// Queue of pending inputs.
-    pub pending_inputs: VecDeque<Vec<u8>>,
     /// Packet generator for this client (handles sequence numbers and redundancy)
     pub packet_generator: crate::kaillera::protocol::UDPPacketGenerator,
 }
 
 impl ClientInfo {
-    /// Adds an input to the pending inputs queue.
     #[allow(dead_code)]
-    fn add_input(&mut self, data: Vec<u8>) {
-        self.pending_inputs.push_back(data);
+    /// Get username as String (for logging/display, uses lossy conversion)
+    pub fn username_str(&self) -> String {
+        String::from_utf8_lossy(&self.username).to_string()
     }
 
-    /// Retrieves and removes the next input from the pending queue.
     #[allow(dead_code)]
-    fn get_next_input(&mut self) -> Option<Vec<u8>> {
-        self.pending_inputs.pop_front()
+    /// Get emulator name as String (for logging/display, uses lossy conversion)
+    pub fn emulator_name_str(&self) -> String {
+        String::from_utf8_lossy(&self.emulator_name).to_string()
+    }
+
+    #[allow(dead_code)]
+    /// Get username for logging (safe display - shows ASCII and hex for non-ASCII)
+    pub fn username_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.username)
+    }
+
+    #[allow(dead_code)]
+    /// Get emulator name for logging (safe display)
+    pub fn emulator_name_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.emulator_name)
     }
 }
 
-impl crate::game_cache::ClientTrait for ClientInfo {
-    fn id(&self) -> u32 {
-        self.user_id as u32
+pub const GAME_STATUS_WAITING: u8 = 0;
+pub const GAME_STATUS_PLAYING: u8 = 1;
+#[allow(dead_code)]
+pub const GAME_STATUS_NET_SYNC: u8 = 2;
+
+/// Player information stored in GameInfo (immutable after joining)
+/// These fields don't change once a player joins the game
+#[derive(Debug, Clone)]
+pub struct GamePlayerInfo {
+    pub addr: std::net::SocketAddr,
+    pub username: Vec<u8>, // Store as bytes to preserve original encoding
+    pub user_id: u16,
+    pub conn_type: u8,
+}
+
+impl GamePlayerInfo {
+    #[allow(dead_code)]
+    /// Get username as String (for logging/display, uses lossy conversion)
+    pub fn username_str(&self) -> String {
+        String::from_utf8_lossy(&self.username).to_string()
     }
 
-    fn get_receive_cache(&mut self) -> &mut crate::game_cache::GameCache {
-        &mut self.receive_cache
-    }
-
-    fn add_input(&mut self, data: Vec<u8>) {
-        self.pending_inputs.push_back(data);
-    }
-
-    fn has_pending_input(&self) -> bool {
-        !self.pending_inputs.is_empty()
-    }
-
-    fn get_next_input(&mut self) -> Option<Vec<u8>> {
-        self.get_next_input()
+    /// Get username for logging (safe display)
+    #[allow(dead_code)]
+    pub fn username_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.username)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct GameInfo {
     pub game_id: u32,
-    pub game_name: String,
-    pub emulator_name: String,
-    pub owner: String,
+    pub game_name: Vec<u8>,     // Store as bytes to preserve original encoding
+    pub emulator_name: Vec<u8>, // Store as bytes to preserve original encoding
+    pub owner: Vec<u8>,         // Store as bytes to preserve original encoding
+    pub owner_user_id: u16,     // Owner's user_id for authorization checks
     pub num_players: u8,
     pub max_players: u8,
     pub game_status: u8, // 0=Waiting, 1=Playing, 2=Netsync
-    pub players: HashSet<std::net::SocketAddr>,
+    // Player information in order (indexed by player_id)
+    pub players: Vec<GamePlayerInfo>,
     // New: SimpleGameSync for frame synchronization
-    pub sync_manager: Option<simple_game_sync::SimpleGameSync>,
-    // Player addresses in order (indexed by player_id)
-    pub player_addrs: Vec<std::net::SocketAddr>,
-    // Player delays (indexed by player_id)
-    pub player_delays: Vec<usize>,
+    pub sync_manager: Option<simplest_game_sync::CachedGameSync>,
+}
+
+impl GameInfo {
+    #[allow(dead_code)]
+    /// Get game name as String (for logging/display, uses lossy conversion)
+    pub fn game_name_str(&self) -> String {
+        String::from_utf8_lossy(&self.game_name).to_string()
+    }
+
+    /// Get emulator name as String (for logging/display, uses lossy conversion)
+    #[allow(dead_code)]
+    pub fn emulator_name_str(&self) -> String {
+        String::from_utf8_lossy(&self.emulator_name).to_string()
+    }
+
+    /// Get owner name as String (for logging/display, uses lossy conversion)
+    #[allow(dead_code)]
+    pub fn owner_str(&self) -> String {
+        String::from_utf8_lossy(&self.owner).to_string()
+    }
+
+    /// Get game name for logging (safe display)
+    #[allow(dead_code)]
+    pub fn game_name_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.game_name)
+    }
+
+    /// Get emulator name for logging (safe display)
+    #[allow(dead_code)]
+    pub fn emulator_name_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.emulator_name)
+    }
+
+    /// Get owner name for logging (safe display)
+    #[allow(dead_code)]
+    pub fn owner_for_log(&self) -> String {
+        crate::handlers::util::bytes_for_log(&self.owner)
+    }
 }

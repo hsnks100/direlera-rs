@@ -1,83 +1,257 @@
-use handlerf::*;
+use direlera_rs::logger::{init_logger, LogFormat, LogLevel};
 use packet_util::*;
-use std::error::Error;
+use serde::Deserialize;
+use std::fs;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
+use tracing::{debug, error, info, warn};
 
+mod fields;
 mod kaillera;
 mod packet_util;
+mod state;
 
 mod handlers;
 use handlers::*;
 
-mod game_cache;
-mod game_sync;
-mod simple_game_sync;
-use handlers::data::*;
+mod session_manager;
 
-const MAIN_PORT: u16 = 8080;
-const CONTROL_PORT: u16 = 27888;
+mod simplest_game_sync;
+use session_manager::SessionManager;
+use state::*;
+
+// Configuration structures
+#[derive(Debug, Deserialize, Clone)]
+pub struct Config {
+    #[serde(default = "default_main_port")]
+    pub main_port: u16,
+    #[serde(default = "default_sub_port")]
+    pub control_port: u16,
+    #[serde(default)]
+    pub tracing: TracingConfig,
+    #[serde(default = "default_welcome_message")]
+    pub welcome_message: String,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            main_port: default_main_port(),
+            control_port: default_sub_port(),
+            tracing: TracingConfig::default(),
+            welcome_message: default_welcome_message(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct TracingConfig {
+    #[serde(default = "default_format")]
+    pub format: String,
+    #[serde(default = "default_level")]
+    pub level: String,
+}
+
+impl Default for TracingConfig {
+    fn default() -> Self {
+        Self {
+            format: default_format(),
+            level: default_level(),
+        }
+    }
+}
+
+fn default_main_port() -> u16 {
+    27888
+}
+
+fn default_sub_port() -> u16 {
+    8080
+}
+
+fn default_format() -> String {
+    "compact".to_string()
+}
+
+fn default_level() -> String {
+    "info".to_string()
+}
+
+fn default_welcome_message() -> String {
+    "Welcome to the Kaillera server!".to_string()
+}
+
+// Load configuration from config.toml
+fn load_config() -> Config {
+    match fs::read_to_string("config.toml") {
+        Ok(contents) => match toml::from_str(&contents) {
+            Ok(config) => {
+                eprintln!("Configuration loaded from config.toml");
+                config
+            }
+            Err(e) => {
+                eprintln!("Failed to parse config.toml: {}", e);
+                eprintln!("Using default configuration");
+                Config::default()
+            }
+        },
+        Err(_) => {
+            eprintln!("config.toml not found, using default configuration");
+            Config::default()
+        }
+    }
+}
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    // Bind two UDP sockets: one for main logic (8080) and one for control logic (27888)
-    let main_socket = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", MAIN_PORT)).await?);
-    let control_socket = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", CONTROL_PORT)).await?);
-    println!("Main socket listening on 127.0.0.1:{}...", MAIN_PORT);
-    println!("Control socket listening on 127.0.0.1:{}...", CONTROL_PORT);
+async fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
+    // Load configuration from config.toml
+    let config = load_config();
+
+    // Parse log level
+    let log_level = match config.tracing.level.to_lowercase().as_str() {
+        "trace" => LogLevel::Trace,
+        "debug" => LogLevel::Debug,
+        "info" => LogLevel::Info,
+        "warn" => LogLevel::Warn,
+        "error" => LogLevel::Error,
+        _ => {
+            eprintln!("Invalid log level '{}', using INFO", config.tracing.level);
+            LogLevel::Info
+        }
+    };
+
+    // Initialize tracing subscriber based on config
+    let log_format = match config.tracing.format.to_lowercase().as_str() {
+        "pretty" => LogFormat::Pretty,
+        "json" => LogFormat::Json,
+        "compact" | _ => LogFormat::Compact,
+    };
+
+    init_logger(log_format, log_level);
+
+    info!(
+        { fields::CONFIG_SOURCE } = "config.toml",
+        { fields::PORT } = config.main_port,
+        control_port = config.control_port,
+        tracing_format = config.tracing.format.as_str(),
+        tracing_level = config.tracing.level.as_str(),
+        "Server configuration loaded"
+    );
+
+    // Bind two UDP sockets using configured ports
+    let main_socket = Arc::new(
+        UdpSocket::bind(format!("0.0.0.0:{}", config.main_port))
+            .await
+            .map_err(|e| {
+                error!(
+                    { fields::PORT } = config.main_port,
+                    { fields::ERROR } = %e,
+                    "Failed to bind main socket"
+                );
+                e
+            })?,
+    );
+
+    let control_socket = Arc::new(
+        UdpSocket::bind(format!("0.0.0.0:{}", config.control_port))
+            .await
+            .map_err(|e| {
+                error!(
+                    { fields::PORT } = config.control_port,
+                    { fields::ERROR } = %e,
+                    "Failed to bind control socket"
+                );
+                e
+            })?,
+    );
+
+    info!(
+        { fields::PORT } = config.main_port,
+        control_port = config.control_port,
+        bind_address = "0.0.0.0",
+        "Sockets bound successfully - server listening"
+    );
 
     let (tx, mut rx) = mpsc::channel::<Message>(100);
 
-    // Centralized AppState with RwLock for efficiency
-    let state = Arc::new(AppState::new(tx.clone()));
+    // Centralized AppState with RwLock for efficiency (shared by all sessions)
+    let global_state = Arc::new(AppState::new(tx.clone(), config.clone()));
+
+    // Initialize Session Manager for TCP-like session handling
+    let (session_manager, packet_rx) = SessionManager::new();
+    let session_manager = Arc::new(session_manager);
+
+    // Start periodic session cleanup task
+    session_manager
+        .clone()
+        .start_cleanup_task(global_state.clone());
+
+    // Start session manager (spawns handlers for each client)
+    let manager_for_run = session_manager.clone();
+    let state_for_sessions = global_state.clone();
+    tokio::spawn(async move {
+        manager_for_run.run(packet_rx, state_for_sessions).await;
+    });
+
+    info!("Server initialization complete");
 
     // Task to send responses in the main socket
     let main_socket_send = main_socket.clone();
     tokio::spawn(async move {
         while let Some(message) = rx.recv().await {
             if let Err(e) = main_socket_send.send_to(&message.data, &message.addr).await {
-                eprintln!("Failed to send response to {}: {}", message.addr, e);
+                warn!(
+                    { fields::ADDR } = %message.addr,
+                    { fields::ERROR } = %e,
+                    "Failed to send response"
+                );
             }
         }
     });
 
     // Control logic for HELLO0.83 and PING requests (Port 27888)
-    tokio::spawn(handle_control_socket(control_socket.clone()));
+    let main_port_for_control = config.main_port;
+    tokio::spawn(handle_control_socket(
+        control_socket.clone(),
+        main_port_for_control,
+    ));
 
-    // Main game loop for game-related messages (Port 8080)
+    info!("Server ready to accept connections");
+
+    // Main UDP dispatcher - forwards packets to session manager
+    let packet_sender = session_manager.packet_sender();
     let mut buf = [0u8; 4096];
+
     loop {
-        let (len, src) = main_socket.recv_from(&mut buf).await?;
-        let data = &buf[..len];
-
-        match parse_packet(data) {
-            Ok(messages) => {
-                for message in messages.iter() {
-                    // 0 is special case, it means the first message
-                    if message.message_number == 0 && messages.len() == 1 {
-                        state.packet_peeker.write().await.insert(src, 0);
-                    }
-                }
-                for message in messages {
-                    let mut packet_peeker_lock = state.packet_peeker.write().await;
-                    let message_number_to_process = *packet_peeker_lock.get(&src).unwrap_or(&0);
-
-                    if message.message_number == message_number_to_process {
-                        // Update message number before processing to release lock quickly
-                        packet_peeker_lock.insert(src, message_number_to_process + 1);
-                        drop(packet_peeker_lock); // Explicitly release lock before long operation
-
-                        // Handle message and log errors without crashing
-                        if let Err(e) = handle_message(message, &src, state.clone()).await {
-                            eprintln!("[Error] Failed to handle message from {}: {}", src, e);
-                            // Continue processing other messages instead of crashing
-                        }
-                    }
-                }
-            }
+        let recv_result = main_socket.recv_from(&mut buf).await;
+        let (len, src) = match recv_result {
+            Ok(ok) => ok,
             Err(e) => {
-                eprintln!("Failed to parse packet from {}: {}", src, e);
+                // recv_from errors are usually system-level issues, not client-specific
+                // Log at debug level to avoid spam, as these are often expected
+                debug!(
+                    { fields::ERROR } = %e,
+                    "recv_from failed, continuing"
+                );
+                continue;
             }
+        };
+        let data = buf[..len].to_vec();
+
+        debug!(
+            { fields::ADDR } = %src,
+            { fields::PACKET_SIZE } = len,
+            "Packet received - forwarding to session manager"
+        );
+
+        // Forward to session manager (will create session if needed)
+        if let Err(e) = packet_sender.send((src, data)).await {
+            warn!(
+                { fields::ADDR } = %src,
+                { fields::ERROR } = %e,
+                "Failed to forward packet to session manager"
+            );
         }
     }
 }
@@ -86,4 +260,66 @@ async fn main() -> Result<(), Box<dyn Error>> {
 pub struct Message {
     pub data: Vec<u8>,
     pub addr: std::net::SocketAddr,
+}
+
+/// Process a single packet within a session
+async fn process_packet_in_session(
+    data: Vec<u8>,
+    addr: std::net::SocketAddr,
+    global_state: Arc<AppState>,
+) {
+    debug!("Processing packet");
+
+    // Parse and handle messages
+    match parse_packet(&data) {
+        Ok(messages) => {
+            for message in messages.iter() {
+                // 0 is special case, it means the first message
+                if message.message_number == 0 && messages.len() == 1 {
+                    global_state.packet_peeker.write().await.insert(addr, 0);
+                }
+            }
+
+            for message in messages {
+                let mut packet_peeker_lock = global_state.packet_peeker.write().await;
+                let message_number_to_process = *packet_peeker_lock.get(&addr).unwrap_or(&0);
+
+                if message.message_number == message_number_to_process {
+                    // Update message number before processing to release lock quickly
+                    packet_peeker_lock.insert(addr, message_number_to_process + 1);
+                    drop(packet_peeker_lock); // Explicitly release lock before long operation
+
+                    // Save message_number before moving message
+                    let msg_number = message.message_number;
+                    let msg_type = message.message_type;
+
+                    // Handle message and log errors without crashing
+                    if let Err(e) = handle_message(message, &addr, global_state.clone()).await {
+                        // Use Debug format to include error chain and context
+                        error!(
+                            { fields::MESSAGE_NUMBER } = msg_number,
+                            { fields::MESSAGE_TYPE } = format!("0x{:02X}", msg_type),
+                            error = ?e,
+                            error_chain = %e,
+                            "Failed to handle message"
+                        );
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            // Log first few bytes for debugging
+            let preview = if data.len() > 0 {
+                format!("{:02x?}", &data[..data.len().min(20)])
+            } else {
+                "empty".to_string()
+            };
+            warn!(
+                { fields::PACKET_SIZE } = data.len(),
+                { fields::ERROR } = %e,
+                packet_preview = preview,
+                "Failed to parse packet"
+            );
+        }
+    }
 }
