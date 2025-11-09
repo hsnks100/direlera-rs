@@ -22,4 +22,4 @@ encoding_rs = "0.8"
 
 
 [profile.release]
-debug = true
+debug = false

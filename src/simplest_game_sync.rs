@@ -36,6 +36,12 @@ pub struct InputCache {
     slots: VecDeque<Vec<u8>>,
 }
 
+impl Default for InputCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InputCache {
     pub fn new() -> Self {
         Self {
@@ -397,7 +403,7 @@ impl CachedGameSync {
             }
             ClientInput::GameCache(pos) => self.input_caches[player_id]
                 .get(pos)
-                .ok_or_else(|| GameSyncError::CachePositionNotFound {
+                .ok_or(GameSyncError::CachePositionNotFound {
                     player_id,
                     position: pos,
                 })?
