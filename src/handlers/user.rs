@@ -55,6 +55,7 @@ pub async fn handle_user_login(
         game_id: None,
         last_ping_time: Some(Instant::now()),
         ack_count: 0,
+        ping_samples: Vec::new(),
         packet_generator: kaillera::protocol::UDPPacketGenerator::new(),
     };
 

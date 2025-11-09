@@ -116,8 +116,15 @@ pub async fn send_packet(
     packet_type: u8,
     data: Vec<u8>,
 ) -> color_eyre::Result<()> {
+    use crate::kaillera::message_types as msg;
+    use std::time::Instant;
+
     let response_packet = state
         .update_client::<_, Vec<u8>, color_eyre::Report>(addr, |client| {
+            // Record timestamp when sending SERVER_TO_CLIENT_ACK for ping measurement
+            if packet_type == msg::SERVER_TO_CLIENT_ACK {
+                client.last_ping_time = Some(Instant::now());
+            }
             Ok(client.packet_generator.make_send_packet(packet_type, data))
         })
         .await?;
