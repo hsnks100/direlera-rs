@@ -125,7 +125,8 @@ async fn main() -> color_eyre::Result<()> {
     let log_format = match config.tracing.format.to_lowercase().as_str() {
         "pretty" => LogFormat::Pretty,
         "json" => LogFormat::Json,
-        "compact" | _ => LogFormat::Compact,
+        "compact" => LogFormat::Compact,
+        _ => LogFormat::Compact,
     };
 
     init_logger(log_format, log_level);
@@ -309,7 +310,7 @@ async fn process_packet_in_session(
         }
         Err(e) => {
             // Log first few bytes for debugging
-            let preview = if data.len() > 0 {
+            let preview = if !data.is_empty() {
                 format!("{:02x?}", &data[..data.len().min(20)])
             } else {
                 "empty".to_string()

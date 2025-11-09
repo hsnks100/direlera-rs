@@ -465,7 +465,7 @@ pub fn bytes_to_string(bytes: &[u8]) -> String {
 /// Analyzes the message text to determine which encoding should be used
 fn detect_encoding_from_message(message: &str) -> &'static Encoding {
     // Check if message has non-ASCII characters
-    let has_non_ascii = message.chars().any(|c| !c.is_ascii());
+    let has_non_ascii = !message.is_ascii();
 
     // If no non-ASCII characters, use UTF-8 (most compatible)
     if !has_non_ascii {
