@@ -1,4 +1,4 @@
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use color_eyre::eyre::eyre;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
@@ -251,30 +251,31 @@ pub async fn handle_quit_game(
     src: &std::net::SocketAddr,
     state: Arc<AppState>,
 ) -> color_eyre::Result<()> {
-    // Get game_id first and release client lock before acquiring game lock
-    let (username, user_id, game_id) = {
-        let client_info = match state.get_client(src).await {
-            Some(client_info) => client_info,
-            None => {
-                error!(
-                    { fields::ADDR } = %src,
-                    "Client not found during game quit"
-                );
-                return Ok(());
-            }
-        };
-        let game_id = match client_info.game_id {
-            Some(game_id) => game_id,
-            None => {
-                error!(
-                    { fields::ADDR } = %src,
-                    "Game ID not found during game quit"
-                );
-                return Ok(());
-            }
-        };
-        (client_info.username.clone(), client_info.user_id, game_id)
+    // Get client info and validate
+    let client_info = match state.get_client(src).await {
+        Some(client_info) => client_info,
+        None => {
+            error!(
+                { fields::ADDR } = %src,
+                "Client not found during game quit"
+            );
+            return Ok(());
+        }
     };
+
+    let game_id = match client_info.game_id {
+        Some(game_id) => game_id,
+        None => {
+            error!(
+                { fields::ADDR } = %src,
+                "Game ID not found during game quit"
+            );
+            return Ok(());
+        }
+    };
+
+    let username = client_info.username.clone();
+    let user_id = client_info.user_id;
 
     // If game is in playing state, drop game first for all players
     info!(
@@ -285,27 +286,33 @@ pub async fn handle_quit_game(
     // Ignore errors from execute_drop_game - it's safe to continue even if drop fails
     let _ = execute_drop_game(game_id, src, &state).await;
 
-    // Update game info
-    let game_info_clone = {
-        let mut games_lock = state.games.write().await;
-        let game_info = match games_lock.get_mut(&game_id) {
-            Some(game_info) => game_info,
-            None => {
-                error!(
-                    { fields::GAME_ID } = game_id,
-                    "Game not found during game quit"
-                );
-                return Ok(());
-            }
-        };
-        // Remove from players
-        if let Some(idx) = game_info.players.iter().position(|p| p.addr == *src) {
-            game_info.players.remove(idx);
-            game_info.num_players -= 1;
+    // Extract necessary information and remove player from game
+    let mut games_lock = state.games.write().await;
+    let game_info = match games_lock.get_mut(&game_id) {
+        Some(game_info) => game_info,
+        None => {
+            error!(
+                { fields::GAME_ID } = game_id,
+                "Game not found during game quit"
+            );
+            return Ok(());
         }
-
-        game_info.clone()
     };
+
+    // Store necessary info before modifying
+    let owner_user_id = game_info.owner_user_id;
+    let player_addrs: Vec<_> = game_info.players.iter().map(|p| p.addr).collect();
+    let game_status = game_info.game_status;
+    let max_players = game_info.max_players;
+
+    // Remove from players
+    if let Some(idx) = game_info.players.iter().position(|p| p.addr == *src) {
+        game_info.players.remove(idx);
+        game_info.num_players -= 1;
+    }
+
+    let num_players = game_info.num_players;
+    drop(games_lock); // Release lock early
 
     // Remove client from game
     util::with_client_mut(&state, src, |client_info| {
@@ -315,19 +322,20 @@ pub async fn handle_quit_game(
     .await?;
 
     // Check if quitter is the owner using user_id (to prevent nickname abuse)
-    if game_info_clone.owner_user_id == user_id {
+    if owner_user_id == user_id {
         // Close the game - Remove game from games list
         info!(
-            { fields::GAME_ID } = game_info_clone.game_id,
+            { fields::GAME_ID } = game_id,
             { fields::USER_NAME } = util::bytes_for_log(&username).as_str(),
             { fields::USER_ID } = user_id,
             "Owner quit - closing game"
         );
-        state.remove_game(game_info_clone.game_id).await;
+
+        state.remove_game(game_id).await;
 
         // Update remaining players' status
-        for player in &game_info_clone.players {
-            util::with_client_mut(&state, &player.addr, |client_info| {
+        for player_addr in &player_addrs {
+            util::with_client_mut(&state, player_addr, |client_info| {
                 client_info.game_id = None;
                 client_info.player_status = PLAYER_STATUS_IDLE;
             })
@@ -335,29 +343,39 @@ pub async fn handle_quit_game(
         }
 
         // Make close game notification
-        let data = packet_util::build_close_game_packet(game_info_clone.game_id);
+        let data = packet_util::build_close_game_packet(game_id);
         util::broadcast_packet(&state, msg::CLOSE_GAME, data).await?;
 
-        // Quit game notification
+        // Quit game notification - send directly to stored player addresses
+        // (can't use broadcast_packet_to_game since game was already removed)
         let data = packet_util::build_quit_game_packet(&username, user_id);
-        util::broadcast_packet_to_game(&state, game_info_clone.game_id, msg::QUIT_GAME, data)
-            .await?;
+        for player_addr in &player_addrs {
+            util::send_packet(&state, player_addr, msg::QUIT_GAME, data.clone()).await?;
+        }
     } else {
         info!(
-            { fields::GAME_ID } = game_info_clone.game_id,
+            { fields::GAME_ID } = game_id,
             { fields::USER_NAME } = util::bytes_for_log(&username).as_str(),
-            { fields::PLAYER_COUNT } = game_info_clone.num_players,
+            { fields::PLAYER_COUNT } = num_players,
             "Player quit game"
         );
 
-        // Update game status
-        let status_data = util::make_update_game_status(&game_info_clone)?;
+        // Update game status - build packet directly with necessary values
+        let status_data = {
+            use crate::packet_util;
+            let mut data = BytesMut::new();
+            packet_util::put_empty_string(&mut data);
+            data.put_u32_le(game_id);
+            data.put_u8(game_status);
+            data.put_u8(num_players);
+            data.put_u8(max_players);
+            data.to_vec()
+        };
         util::broadcast_packet(&state, msg::UPDATE_GAME_STATUS, status_data).await?;
 
         // Quit game notification
         let data = packet_util::build_quit_game_packet(&username, user_id);
-        util::broadcast_packet_to_game(&state, game_info_clone.game_id, msg::QUIT_GAME, data)
-            .await?;
+        util::broadcast_packet_to_game(&state, game_id, msg::QUIT_GAME, data).await?;
     }
     Ok(())
 }

@@ -1,23 +1,68 @@
 name: Release Tag
+
 on:
   release:
     types: [created]
 
+permissions:
+  contents: write
+
 jobs:
   release:
-    name: release ${{ matrix.target }}
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: [x86_64-pc-windows-gnu, x86_64-unknown-linux-musl]
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-freebsd
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+
+    runs-on: ${{ matrix.os }}
+
     steps:
-      - uses: actions/checkout@master
-      - name: Compile and release
-        uses: rust-build/rust-build.action@v1.4.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v5
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compile
+        uses: houseabsolute/actions-rust-cross@v1
         with:
-          RUSTTARGET: ${{ matrix.target }}
-          EXTRA_FILES: "README.md LICENSE config.toml"
-          TOOLCHAIN_VERSION: "1.82"
+          target: ${{ matrix.target }}
+          args: "--release --locked"
+          strip: true
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          BIN_NAME="direlera-rs"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            BIN_EXT=".exe"
+          else
+            BIN_EXT=""
+          fi
+          PKG_DIR="$BIN_NAME"
+          ARCHIVE="${BIN_NAME}_${{ github.ref_name }}_${{ matrix.target }}.zip"
+
+          mkdir -p "$PKG_DIR"
+          cp "target/${{ matrix.target }}/release/${BIN_NAME}${BIN_EXT}" "$PKG_DIR/"
+          cp config.toml LICENSE README.md "$PKG_DIR/"
+
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            7z a "$ARCHIVE" "$PKG_DIR"
+          else
+            zip -r "$ARCHIVE" "$PKG_DIR"
+          fi
+          
+          echo "archive=$ARCHIVE" >> $GITHUB_OUTPUT
+
+      - name: Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.archive }}

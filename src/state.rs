@@ -146,11 +146,12 @@ pub struct ClientInfo {
     pub emulator_name: Vec<u8>, // Store as bytes to preserve original encoding
     pub conn_type: u8,
     pub user_id: u16,
-    pub ping: u32,
+    pub ping: u32, // Average ping value (average of last 5 measurements, excluding first)
     pub player_status: PlayerStatus,
     pub game_id: Option<u32>,
-    pub last_ping_time: Option<Instant>,
+    pub last_ping_time: Option<Instant>, // Timestamp when SERVER_TO_CLIENT_ACK was sent (for RTT measurement)
     pub ack_count: u16,
+    pub ping_samples: Vec<u32>, // Recent RTT measurements for averaging (max 5, excluding first measurement)
     //////////////////
     /// Packet generator for this client (handles sequence numbers and redundancy)
     pub packet_generator: crate::kaillera::protocol::UDPPacketGenerator,

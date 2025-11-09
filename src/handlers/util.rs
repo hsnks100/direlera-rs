@@ -116,8 +116,15 @@ pub async fn send_packet(
     packet_type: u8,
     data: Vec<u8>,
 ) -> color_eyre::Result<()> {
+    use crate::kaillera::message_types as msg;
+    use std::time::Instant;
+
     let response_packet = state
         .update_client::<_, Vec<u8>, color_eyre::Report>(addr, |client| {
+            // Record timestamp when sending SERVER_TO_CLIENT_ACK for ping measurement
+            if packet_type == msg::SERVER_TO_CLIENT_ACK {
+                client.last_ping_time = Some(Instant::now());
+            }
             Ok(client.packet_generator.make_send_packet(packet_type, data))
         })
         .await?;
@@ -458,7 +465,7 @@ pub fn bytes_to_string(bytes: &[u8]) -> String {
 /// Analyzes the message text to determine which encoding should be used
 fn detect_encoding_from_message(message: &str) -> &'static Encoding {
     // Check if message has non-ASCII characters
-    let has_non_ascii = message.chars().any(|c| !c.is_ascii());
+    let has_non_ascii = !message.is_ascii();
 
     // If no non-ASCII characters, use UTF-8 (most compatible)
     if !has_non_ascii {

@@ -5,7 +5,6 @@ pub mod user;
 pub mod util;
 
 use std::sync::Arc;
-use std::time::Instant;
 use tracing::{debug, instrument, warn};
 
 use crate::kaillera::message_types as msg;
@@ -60,15 +59,35 @@ pub async fn handle_client_to_server_ack(
     state: Arc<AppState>,
 ) -> color_eyre::Result<()> {
     // Client to Server ACK [0x06]
-    // Calculate ping and update ack count
+    // Calculate ping (RTT: time from sending SERVER_TO_CLIENT_ACK to receiving CLIENT_TO_SERVER_ACK)
+    // Average of last 5 measurements, excluding the first measurement
+    // and update ack count
     let ack_count = state
         .update_client::<_, u16, color_eyre::Report>(src, |client_info| {
             if let Some(last_ping_time) = client_info.last_ping_time {
-                let ping = last_ping_time.elapsed().as_millis() as u32;
-                client_info.ping = ping;
-                client_info.last_ping_time = Some(Instant::now());
+                // Calculate round-trip time (RTT) from when we sent SERVER_TO_CLIENT_ACK
+                let current_rtt = last_ping_time.elapsed().as_millis() as u32;
+
                 client_info.ack_count += 1;
+
+                // Skip first measurement (ack_count == 1)
+                if client_info.ack_count > 1 {
+                    // Add current RTT to samples
+                    client_info.ping_samples.push(current_rtt);
+
+                    // Keep only last 5 measurements
+                    if client_info.ping_samples.len() > 5 {
+                        client_info.ping_samples.remove(0);
+                    }
+
+                    // Calculate average of collected samples
+                    if !client_info.ping_samples.is_empty() {
+                        let sum: u32 = client_info.ping_samples.iter().sum();
+                        client_info.ping = sum / client_info.ping_samples.len() as u32;
+                    }
+                }
             }
+            // Note: last_ping_time will be updated when we send SERVER_TO_CLIENT_ACK below
             Ok(client_info.ack_count)
         })
         .await?;

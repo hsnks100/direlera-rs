@@ -1,13 +1,11 @@
 // Logger configuration and setup
-use tracing_subscriber::{
-    fmt::format::FmtSpan,
-    EnvFilter,
-};
+use std::str::FromStr;
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 /// Initialize logger with different formats
 pub fn init_logger(format: LogFormat, level: LogLevel) {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level.as_str()));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level.as_str()));
 
     match format {
         LogFormat::Compact => {
@@ -30,8 +28,8 @@ pub fn init_logger(format: LogFormat, level: LogLevel) {
                 .with_env_filter(filter)
                 .with_target(false)
                 .json()
-                .flatten_event(true)  // fields를 최상위 레벨로 flatten
-                .with_current_span(false)  // current span 정보 제거 (spans 배열만 유지)
+                .flatten_event(true)
+                .with_current_span(false)
                 .with_span_events(FmtSpan::CLOSE)
                 .init();
         }
@@ -47,13 +45,14 @@ pub enum LogFormat {
     Json,
 }
 
-impl LogFormat {
-    #[allow(dead_code)]
-    pub fn from_str(s: &str) -> Self {
+impl FromStr for LogFormat {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "pretty" => LogFormat::Pretty,
-            "json" => LogFormat::Json,
-            _ => LogFormat::Compact,
+            "pretty" => Ok(LogFormat::Pretty),
+            "json" => Ok(LogFormat::Json),
+            _ => Ok(LogFormat::Compact),
         }
     }
 }
@@ -79,16 +78,18 @@ impl LogLevel {
             LogLevel::Error => "error",
         }
     }
+}
 
-    #[allow(dead_code)]
-    pub fn from_str(s: &str) -> Self {
+impl FromStr for LogLevel {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "trace" => LogLevel::Trace,
-            "debug" => LogLevel::Debug,
-            "warn" => LogLevel::Warn,
-            "error" => LogLevel::Error,
-            _ => LogLevel::Info,
+            "trace" => Ok(LogLevel::Trace),
+            "debug" => Ok(LogLevel::Debug),
+            "warn" => Ok(LogLevel::Warn),
+            "error" => Ok(LogLevel::Error),
+            _ => Ok(LogLevel::Info),
         }
     }
 }
-
